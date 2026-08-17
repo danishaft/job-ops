@@ -1,288 +1,38 @@
 # syntax=docker/dockerfile:1.6
 
-# ============================================================================
-# SHARED BASE IMAGES
-# ============================================================================
-FROM --platform=$TARGETPLATFORM node:22-slim AS runtime-base
+FROM --platform=$TARGETPLATFORM node:22-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV NODE_ENV=production
 ENV PORT=3001
-ENV PYTHON_PATH=/usr/bin/python3
 ENV DATA_DIR=/app/data
-ENV CODEX_HOME=/app/codex-home
-ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
-ENV PATH=/root/.local/bin:${PATH}
-ARG CODEX_CLI_VERSION=0.144.6
-ARG CLAUDE_CLI_VERSION=2.1.211
 
-# Install runtime dependencies shared by build and production stages.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
-    python3 python3-minimal libpython3.11-minimal \
-    python3-pip \
-    libgtk-3-0 libgtk-3-common \
-    libdbus-glib-1-2 libxt6 libx11-xcb1 libasound2 \
-    curl && \
-    rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
-
-# Install Codex CLI for local app-server based inference.
-RUN npm install -g @openai/codex@${CODEX_CLI_VERSION}
-
-# Install Claude Code CLI for headless claude_cli provider inference.
-RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CLI_VERSION}
+    curl \
+    build-essential \
+    pkg-config \
+    && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
 
 WORKDIR /app
 
-FROM --platform=$BUILDPLATFORM node:22-slim AS build-base
-
-ENV DEBIAN_FRONTEND=noninteractive
-ENV NODE_ENV=production
-
-WORKDIR /app
-
-# Install compiler toolchain only for build-oriented stages.
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates \
-    python3 python3-minimal libpython3.11-minimal \
-    build-essential pkg-config \
-    curl && \
-    rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
-
-FROM runtime-base AS target-build-base
-
-# Install compiler toolchain for target-platform dependency stages only.
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential pkg-config && \
-    rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
-
-# ============================================================================
-# BUILD INPUT STAGES
-# ============================================================================
-FROM target-build-base AS python-deps
-
-ARG TARGETARCH
-
-# Install Python dependencies with pip cache.
-RUN --mount=type=cache,id=pip-${TARGETARCH},target=/root/.cache/pip \
-    pip3 install --break-system-packages playwright python-jobspy
-
-# Install Firefox for Python Playwright.
-RUN python3 -m playwright install firefox
-
-FROM build-base AS node-deps
-
-ARG BUILDARCH
-
-# Copy package files for dependency installation.
-COPY package*.json ./
-COPY docs-site/package*.json ./docs-site/
-COPY shared/package*.json ./shared/
-COPY orchestrator/package*.json ./orchestrator/
-COPY career-boards/bamboohr/package*.json ./career-boards/bamboohr/
-COPY career-boards/greenhouse/package*.json ./career-boards/greenhouse/
-COPY career-boards/workday/package*.json ./career-boards/workday/
-COPY extractors/adzuna/package*.json ./extractors/adzuna/
-COPY extractors/hiringcafe/package*.json ./extractors/hiringcafe/
-COPY extractors/gradcracker/package*.json ./extractors/gradcracker/
-COPY extractors/jobindex/package*.json ./extractors/jobindex/
-COPY extractors/naukri/package*.json ./extractors/naukri/
-COPY extractors/startupjobs/package*.json ./extractors/startupjobs/
-COPY extractors/workingnomads/package*.json ./extractors/workingnomads/
-COPY extractors/golangjobs/package*.json ./extractors/golangjobs/
-COPY extractors/ukvisajobs/package*.json ./extractors/ukvisajobs/
-COPY extractors/seek/package*.json ./extractors/seek/
-COPY extractors/fiveamsat/package*.json ./extractors/fiveamsat/
-COPY extractors/wazzuf/package*.json ./extractors/wazzuf/
-COPY extractors/browser-utils/package*.json ./extractors/browser-utils/
-
-# Install build-time Node dependencies on the native builder platform. The
-# resulting client/docs assets are architecture-neutral static files.
-RUN --mount=type=cache,id=npm-build-${BUILDARCH},target=/root/.npm \
-    npm install --workspaces --include-workspace-root --include=dev \
-    --no-audit --no-fund --progress=false
-
-FROM node-deps AS build-sources
-
+COPY package.json package-lock.json ./
 COPY shared ./shared
 COPY docs-site ./docs-site
 COPY orchestrator ./orchestrator
-COPY career-boards/bamboohr ./career-boards/bamboohr
-COPY career-boards/greenhouse ./career-boards/greenhouse
-COPY career-boards/workday ./career-boards/workday
+COPY career-boards ./career-boards
+COPY extractors ./extractors
 COPY visa-sponsor-providers ./visa-sponsor-providers
-COPY extractors/adzuna ./extractors/adzuna
-COPY extractors/hiringcafe ./extractors/hiringcafe
-COPY extractors/gradcracker ./extractors/gradcracker
-COPY extractors/jobindex ./extractors/jobindex
-COPY extractors/jobspy ./extractors/jobspy
-COPY extractors/naukri ./extractors/naukri
-COPY extractors/startupjobs ./extractors/startupjobs
-COPY extractors/workingnomads ./extractors/workingnomads
-COPY extractors/golangjobs ./extractors/golangjobs
-COPY extractors/ukvisajobs ./extractors/ukvisajobs
-COPY extractors/seek ./extractors/seek
-COPY extractors/fiveamsat ./extractors/fiveamsat
-COPY extractors/wazzuf ./extractors/wazzuf
-COPY extractors/browser-utils ./extractors/browser-utils
+COPY seed-data ./seed-data
+COPY docker-entrypoint.sh /app/docker-entrypoint.sh
 
-# ============================================================================
-# PARALLEL BUILD STAGES
-# ============================================================================
-FROM build-sources AS docs-build
-
-WORKDIR /app/docs-site
-RUN npm run build
-
-FROM build-sources AS client-build
+RUN npm ci --workspaces --include-workspace-root --include=dev --no-audit --no-fund --progress=false
 
 WORKDIR /app/orchestrator
 RUN npm run build:client
 
-# ============================================================================
-# PRODUCTION INPUT STAGES
-# ============================================================================
-FROM runtime-base AS runtime-node-deps
-
-ARG TARGETARCH
-
-# Install virtual display dependencies for the headed Cloudflare challenge solver.
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    xvfb x11vnc novnc websockify && \
-    rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
-
-# Copy package files for production dependency installation.
-COPY package*.json ./
-COPY docs-site/package*.json ./docs-site/
-COPY shared/package*.json ./shared/
-COPY orchestrator/package*.json ./orchestrator/
-COPY career-boards/bamboohr/package*.json ./career-boards/bamboohr/
-COPY career-boards/greenhouse/package*.json ./career-boards/greenhouse/
-COPY career-boards/workday/package*.json ./career-boards/workday/
-COPY extractors/adzuna/package*.json ./extractors/adzuna/
-COPY extractors/hiringcafe/package*.json ./extractors/hiringcafe/
-COPY extractors/gradcracker/package*.json ./extractors/gradcracker/
-COPY extractors/jobindex/package*.json ./extractors/jobindex/
-COPY extractors/naukri/package*.json ./extractors/naukri/
-COPY extractors/startupjobs/package*.json ./extractors/startupjobs/
-COPY extractors/workingnomads/package*.json ./extractors/workingnomads/
-COPY extractors/golangjobs/package*.json ./extractors/golangjobs/
-COPY extractors/ukvisajobs/package*.json ./extractors/ukvisajobs/
-COPY extractors/seek/package*.json ./extractors/seek/
-COPY extractors/fiveamsat/package*.json ./extractors/fiveamsat/
-COPY extractors/wazzuf/package*.json ./extractors/wazzuf/
-COPY extractors/browser-utils/package*.json ./extractors/browser-utils/
-
-# Install production Node dependencies only.
-RUN --mount=type=cache,id=npm-runtime-${TARGETARCH},target=/root/.npm \
-    npm install --workspaces --include-workspace-root --omit=dev \
-    --no-audit --no-fund --progress=false
-
-
-FROM runtime-node-deps AS camoufox-cache
-
-# Fetch target-platform Camoufox binaries after production dependencies are
-# installed so arm64 images do not inherit x64 browser assets from build stages.
-COPY scripts/camoufox-fetch.mjs ./scripts/camoufox-fetch.mjs
-RUN --mount=type=secret,id=github_token,required=false \
-    sh -c 'GITHUB_TOKEN="$([ -f /run/secrets/github_token ] && cat /run/secrets/github_token || true)" node ./scripts/camoufox-fetch.mjs'
-
-FROM runtime-base AS tectonic
-
-ARG TARGETARCH
-ENV TECTONIC_VERSION=0.15.0
-
-# Install Tectonic for local LaTeX resume rendering.
-# Upstream publishes a musl Linux ARM build but not a glibc one, so map
-# Docker's target architecture to the matching release asset explicitly.
-RUN set -eux; \
-    case "${TARGETARCH}" in \
-        amd64) tectonic_arch="x86_64-unknown-linux-gnu" ;; \
-        arm64) tectonic_arch="aarch64-unknown-linux-musl" ;; \
-        *) echo "Unsupported TARGETARCH for Tectonic: ${TARGETARCH}" >&2; exit 1 ;; \
-    esac; \
-    tectonic_asset="tectonic-${TECTONIC_VERSION}-${tectonic_arch}.tar.gz"; \
-    curl --proto '=https' --tlsv1.2 -fsSL \
-        "https://github.com/tectonic-typesetting/tectonic/releases/download/tectonic%40${TECTONIC_VERSION}/${tectonic_asset}" \
-        -o /tmp/tectonic.tar.gz; \
-    tar -xzf /tmp/tectonic.tar.gz -C /tmp; \
-    install -m 0755 "/tmp/tectonic" /usr/local/bin/tectonic; \
-    rm -f /tmp/tectonic.tar.gz /tmp/tectonic
-
-FROM runtime-base AS typst
-
-ARG TARGETARCH
-ENV TYPST_VERSION=0.14.2
-
-# Install Typst for local themeable resume rendering.
-RUN apt-get update && apt-get install -y --no-install-recommends xz-utils && \
-    rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
-RUN set -eux; \
-    case "${TARGETARCH}" in \
-        amd64) typst_arch="x86_64-unknown-linux-musl" ;; \
-        arm64) typst_arch="aarch64-unknown-linux-musl" ;; \
-        *) echo "Unsupported TARGETARCH for Typst: ${TARGETARCH}" >&2; exit 1 ;; \
-    esac; \
-    typst_asset="typst-${typst_arch}.tar.xz"; \
-    curl --proto '=https' --tlsv1.2 -fsSL \
-        "https://github.com/typst/typst/releases/download/v${TYPST_VERSION}/${typst_asset}" \
-        -o /tmp/typst.tar.xz; \
-    mkdir -p /tmp/typst; \
-    tar -xJf /tmp/typst.tar.xz -C /tmp/typst --strip-components=1; \
-    install -m 0755 "/tmp/typst/typst" /usr/local/bin/typst; \
-    rm -rf /tmp/typst.tar.xz /tmp/typst
-
-# ============================================================================
-# PRODUCTION STAGE
-# ============================================================================
-FROM runtime-node-deps AS production
-
-# Copy production-only runtime assets from sibling stages.
-COPY --from=tectonic /usr/local/bin/tectonic /usr/local/bin/tectonic
-COPY --from=typst /usr/local/bin/typst /usr/local/bin/typst
-COPY --from=python-deps /usr/local/lib/python3.11/dist-packages /usr/local/lib/python3.11/dist-packages
-COPY --from=python-deps /ms-playwright /ms-playwright
-COPY --from=camoufox-cache /root/.cache/camoufox /root/.cache/camoufox
-
-# Copy built assets and runtime source code.
-COPY --from=client-build /app/orchestrator/dist ./orchestrator/dist
-COPY --from=docs-build /app/docs-site/build ./orchestrator/dist/docs
-COPY shared ./shared
-COPY orchestrator ./orchestrator
-COPY career-boards/bamboohr ./career-boards/bamboohr
-COPY career-boards/greenhouse ./career-boards/greenhouse
-COPY career-boards/workday ./career-boards/workday
-COPY visa-sponsor-providers ./visa-sponsor-providers
-COPY extractors/adzuna ./extractors/adzuna
-COPY extractors/hiringcafe ./extractors/hiringcafe
-COPY extractors/gradcracker ./extractors/gradcracker
-COPY extractors/jobindex ./extractors/jobindex
-COPY extractors/jobspy ./extractors/jobspy
-COPY extractors/naukri ./extractors/naukri
-COPY extractors/startupjobs ./extractors/startupjobs
-COPY extractors/workingnomads ./extractors/workingnomads
-COPY extractors/golangjobs ./extractors/golangjobs
-COPY extractors/ukvisajobs ./extractors/ukvisajobs
-COPY extractors/seek ./extractors/seek
-COPY extractors/fiveamsat ./extractors/fiveamsat
-COPY extractors/wazzuf ./extractors/wazzuf
-COPY extractors/browser-utils ./extractors/browser-utils
-
-# Create runtime directories.
-RUN mkdir -p /app/data/pdfs /app/data/cloudflare-cookies /app/codex-home
-
-ENV DISPLAY=:99
-ENV NOVNC_PORT=6080
-ENV NOVNC_HOST=127.0.0.1
-ENV VNC_HOST=127.0.0.1
+RUN chmod +x /app/docker-entrypoint.sh
 
 EXPOSE 3001
 
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-  CMD curl -f http://localhost:3001/health || exit 1
-
-COPY docker-entrypoint.sh /app/docker-entrypoint.sh
-RUN chmod +x /app/docker-entrypoint.sh
-
-WORKDIR /app/orchestrator
 ENTRYPOINT ["/app/docker-entrypoint.sh"]

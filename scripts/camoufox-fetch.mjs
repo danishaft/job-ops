@@ -50,5 +50,21 @@ if (githubToken) {
   };
 }
 
-await new CamoufoxFetcher().install();
-await downloadMMDB();
+try {
+  await new CamoufoxFetcher().install();
+} catch (error) {
+  console.warn(
+    "Camoufox download failed (GitHub API may be rate-limited or degraded). " +
+      "Continuing without it — browser-based extractors will fall back or fail individually.",
+    error instanceof Error ? error.message : String(error),
+  );
+}
+try {
+  await downloadMMDB();
+} catch (error) {
+  console.warn(
+    "GeoLite.mmdb download failed (GitHub API may be rate-limited or degraded). " +
+      "Continuing without it — only affects Camoufox locale resolution.",
+    error instanceof Error ? error.message : String(error),
+  );
+}
