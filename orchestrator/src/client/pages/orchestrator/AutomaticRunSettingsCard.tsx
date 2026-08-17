@@ -393,7 +393,7 @@ export function AutomaticRunAdvancedSettings({
 
               <div className="grid gap-4 md:grid-cols-3">
                 <div className="flex flex-col gap-2">
-                  <Label htmlFor="top-n">Resumes tailored</Label>
+                  <Label htmlFor="top-n">Ranked shortlist size</Label>
                   <Input
                     id="top-n"
                     type="number"

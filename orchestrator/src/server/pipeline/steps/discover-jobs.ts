@@ -5,6 +5,7 @@ import { getUserId } from "@server/infra/request-context";
 import { getAllJobUrls } from "@server/repositories/jobs";
 import * as settingsRepo from "@server/repositories/settings";
 import { withHostedUsageReservation } from "@server/services/hosted-usage";
+import { discoverOpportunityCatalogJobs } from "@server/services/opportunity-catalog-discovery";
 import { resolveNearbyPlaceNames } from "@server/services/proximity-search";
 import { asyncPool } from "@server/utils/async-pool";
 import { listHydratedWatchlistSelectedSources } from "@server/watchlist/results";
@@ -372,6 +373,23 @@ export async function discoverJobsStep(args: {
         return {
           discoveredJobs: result.jobs,
           sourceErrors: result.sourceErrors ?? [],
+        };
+      },
+    });
+  }
+
+  if (args.mergedConfig.includeOpportunityCatalog) {
+    sourceTasks.push({
+      source: "opportunity-catalog",
+      detail: "High-signal catalog: fetching startup opportunities...",
+      run: async () => {
+        const result = await discoverOpportunityCatalogJobs({
+          searchTerms,
+          shouldCancel: args.shouldCancel,
+        });
+        return {
+          discoveredJobs: result.jobs,
+          sourceErrors: result.sourceErrors,
         };
       },
     });

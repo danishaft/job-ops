@@ -110,6 +110,65 @@ describe("generateTailoring", () => {
     );
   });
 
+  it("returns a deterministic grounding report and run metadata", async () => {
+    callJsonMock.mockResolvedValueOnce({
+      success: true,
+      data: {
+        summary: "Built TypeScript APIs serving 10M requests daily.",
+        headline: "Backend Engineer",
+        skills: [{ name: "Backend", keywords: ["TypeScript"] }],
+        grounding: {
+          headlineEvidenceIds: [],
+          summaryEvidenceIds: ["experience:exp-1"],
+          skills: [{ name: "TypeScript", evidenceIds: ["skill:skills-1"] }],
+        },
+      },
+    });
+    const result = await generateTailoring("Build APIs", {
+      sections: {
+        experience: {
+          items: [
+            {
+              id: "exp-1",
+              company: "Acme",
+              position: "Engineer",
+              location: "Remote",
+              date: "2024",
+              summary:
+                "Built TypeScript APIs serving 10 million requests daily.",
+              visible: true,
+            },
+          ],
+        },
+        skills: {
+          items: [
+            {
+              id: "skills-1",
+              name: "Backend",
+              description: "",
+              level: 4,
+              keywords: ["TypeScript"],
+              visible: true,
+            },
+          ],
+        },
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.audit).toMatchObject({
+      status: "completed",
+      provider: "openrouter",
+      model: "gpt-4o-mini",
+      validation: { status: "passed", errorCount: 0 },
+    });
+    expect(result.audit.sourceResumeFingerprint).toHaveLength(64);
+    expect(result.audit.outputFingerprint).toHaveLength(64);
+    const prompt = callJsonMock.mock.calls.at(-1)?.[0]?.messages?.[0]?.content;
+    expect(prompt).toContain('"id":"experience:exp-1"');
+    expect(prompt).toContain("EVIDENCE CONTRACT:");
+  });
+
   it("removes language directives from constraints so explicit language settings win", async () => {
     vi.mocked(getWritingStyle).mockResolvedValue({
       tone: "friendly",

@@ -1075,6 +1075,8 @@ describe("OrchestratorPage", () => {
       searchScope: "selected_only",
       matchStrictness: "exact_only",
       watchlistSelectedSourceIds: [],
+      includeOpportunityCatalog: true,
+      prepareTopMatches: false,
     });
     expect(setIntervalSpy).not.toHaveBeenCalledWith(expect.any(Function), 5000);
 

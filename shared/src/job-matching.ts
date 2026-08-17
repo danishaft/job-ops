@@ -1,4 +1,9 @@
 import {
+  buildOpportunityProvenance,
+  mergeOpportunityProvenance,
+  mergeOpportunitySignals,
+} from "./opportunity-routing.js";
+import {
   matchesRequestedCity,
   matchesRequestedCountry,
   shouldApplyStrictCityFilter,
@@ -210,6 +215,30 @@ export function matchJobLocationIntent(
 const FUZZY_DEDUP_TITLE_THRESHOLD = 90;
 const FUZZY_DEDUP_EMPLOYER_THRESHOLD = 85;
 
+export function isLikelySameOpportunity(
+  left: Pick<CreateJobInput, "title" | "employer">,
+  right: Pick<CreateJobInput, "title" | "employer">,
+  opts?: {
+    titleThreshold?: number;
+    employerThreshold?: number;
+  },
+): boolean {
+  const leftTitle = normalizeJobTitle(left.title);
+  const rightTitle = normalizeJobTitle(right.title);
+  const leftEmployer = normalizeCompanyName(left.employer);
+  const rightEmployer = normalizeCompanyName(right.employer);
+  if (!leftTitle || !rightTitle || !leftEmployer || !rightEmployer)
+    return false;
+
+  const titleThreshold = opts?.titleThreshold ?? FUZZY_DEDUP_TITLE_THRESHOLD;
+  const employerThreshold =
+    opts?.employerThreshold ?? FUZZY_DEDUP_EMPLOYER_THRESHOLD;
+  return (
+    calculateSimilarity(leftTitle, rightTitle) > titleThreshold &&
+    calculateSimilarity(leftEmployer, rightEmployer) > employerThreshold
+  );
+}
+
 /**
  * Merge two CreateJobInput objects, preferring the first non-null/non-undefined
  * value for each optional field. Required fields (source, title, employer,
@@ -236,6 +265,17 @@ function mergeJobInputs(
     degreeRequired: base.degreeRequired ?? incoming.degreeRequired,
     starting: base.starting ?? incoming.starting,
     jobDescription: base.jobDescription ?? incoming.jobDescription,
+    opportunitySignals: mergeOpportunitySignals(
+      base.opportunitySignals,
+      incoming.opportunitySignals,
+    ),
+    opportunityProvenance: mergeOpportunityProvenance(
+      [...(base.opportunityProvenance ?? []), buildOpportunityProvenance(base)],
+      [
+        ...(incoming.opportunityProvenance ?? []),
+        buildOpportunityProvenance(incoming),
+      ],
+    ),
     sourceJobId: base.sourceJobId ?? incoming.sourceJobId,
     jobUrlDirect: base.jobUrlDirect ?? incoming.jobUrlDirect,
     datePosted: base.datePosted ?? incoming.datePosted,
@@ -310,19 +350,12 @@ export function deduplicateJobsByTitleAndEmployer(
       continue;
     }
 
-    const match = merged.find((entry) => {
-      if (!entry.normalizedTitle || !entry.normalizedEmployer) return false;
-      const titleScore = calculateSimilarity(
-        normalizedTitle,
-        entry.normalizedTitle,
-      );
-      if (titleScore <= titleThreshold) return false;
-      const employerScore = calculateSimilarity(
-        normalizedEmployer,
-        entry.normalizedEmployer,
-      );
-      return employerScore > employerThreshold;
-    });
+    const match = merged.find((entry) =>
+      isLikelySameOpportunity(entry.job, incoming, {
+        titleThreshold,
+        employerThreshold,
+      }),
+    );
 
     if (match) {
       // Merge incoming fields into the existing entry (first non-null wins).

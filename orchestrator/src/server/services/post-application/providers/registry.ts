@@ -3,6 +3,7 @@ import { POST_APPLICATION_PROVIDERS } from "@shared/types";
 import { providerInvalidRequest } from "./errors";
 import { gmailProvider } from "./gmail";
 import { imapProvider } from "./imap";
+import { outlookProvider } from "./outlook";
 import type { PostApplicationProviderAdapter } from "./types";
 
 const providerRegistry: Record<
@@ -10,6 +11,7 @@ const providerRegistry: Record<
   PostApplicationProviderAdapter
 > = {
   gmail: gmailProvider,
+  outlook: outlookProvider,
   imap: imapProvider,
 };
 

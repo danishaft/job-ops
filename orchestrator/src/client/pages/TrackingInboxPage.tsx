@@ -61,11 +61,11 @@ const PROVIDER_OPTIONS: PostApplicationProvider[] = [
   ...POST_APPLICATION_PROVIDERS,
 ];
 const GMAIL_OAUTH_RESULT_TYPE = "gmail-oauth-result";
-const GMAIL_OAUTH_TIMEOUT_MS = 3 * 60 * 1000;
+const OAUTH_TIMEOUT_MS = 3 * 60 * 1000;
 const EMPTY_INBOX_ITEMS: PostApplicationInboxItem[] = [];
 const EMPTY_SYNC_RUNS: PostApplicationSyncRun[] = [];
 
-type GmailOauthResultMessage = {
+type OauthResultMessage = {
   type: string;
   state?: string;
   code?: string;
@@ -224,10 +224,12 @@ export const TrackingInboxPage: React.FC = () => {
     });
   }, [appliedJobs, inbox, selectedRunItems]);
 
-  const waitForGmailOauthResult = useCallback(
+  const waitForOauthResult = useCallback(
     (
       expectedState: string,
       popup: Window,
+      providerName: "Gmail" | "Outlook",
+      resultType: string,
     ): Promise<{ code?: string; error?: string }> => {
       return new Promise((resolve, reject) => {
         let settled = false;
@@ -259,8 +261,8 @@ export const TrackingInboxPage: React.FC = () => {
 
         const onMessage = (event: MessageEvent<unknown>) => {
           if (event.origin !== window.location.origin) return;
-          const data = event.data as GmailOauthResultMessage | undefined;
-          if (!data || data.type !== GMAIL_OAUTH_RESULT_TYPE) return;
+          const data = event.data as OauthResultMessage | undefined;
+          if (!data || data.type !== resultType) return;
           if (data.state !== expectedState) return;
           finishResolve({
             ...(data.code ? { code: data.code } : {}),
@@ -269,12 +271,14 @@ export const TrackingInboxPage: React.FC = () => {
         };
 
         const timeoutId = window.setTimeout(() => {
-          finishReject("Timed out waiting for Gmail OAuth response.");
-        }, GMAIL_OAUTH_TIMEOUT_MS);
+          finishReject(`Timed out waiting for ${providerName} OAuth response.`);
+        }, OAUTH_TIMEOUT_MS);
 
         const closedCheckId = window.setInterval(() => {
           if (!popup.closed) return;
-          finishReject("Gmail OAuth window was closed before completion.");
+          finishReject(
+            `${providerName} OAuth window was closed before completion.`,
+          );
         }, 250);
 
         window.addEventListener("message", onMessage);
@@ -294,23 +298,42 @@ export const TrackingInboxPage: React.FC = () => {
             provider,
             account_key_is_default: isDefaultAccountKey,
           });
-          if (provider !== "gmail") {
+          if (provider === "imap") {
             trackProductEvent("tracking_inbox_connect_completed", {
               provider,
               result: "error",
             });
             toast.error(
-              `${provider} connect is not implemented yet. Use Gmail for now.`,
+              "IMAP connect is not implemented yet. Use Outlook or Gmail.",
             );
             return;
           }
 
+          if (provider === "outlook") {
+            await api.postApplicationProviderConnect({
+              provider: "outlook",
+              accountKey,
+              payload: {
+                connectionMode: "peruz",
+                displayName: "Outlook Web (Peruz)",
+              },
+            });
+            trackProductEvent("tracking_inbox_connect_completed", {
+              provider,
+              result: "success",
+            });
+            toast.success("Outlook browser session connected");
+            await refresh();
+            return;
+          }
+
+          const providerName = "Gmail";
           const oauthStart = await api.postApplicationGmailOauthStart({
             accountKey,
           });
           const popup = window.open(
             oauthStart.authorizationUrl,
-            "gmail-oauth-connect",
+            `${provider}-oauth-connect`,
             "popup,width=520,height=720",
           );
           if (!popup) {
@@ -319,21 +342,25 @@ export const TrackingInboxPage: React.FC = () => {
               result: "error",
             });
             toast.error(
-              "Browser blocked the Gmail OAuth popup. Allow popups and retry.",
+              `Browser blocked the ${providerName} OAuth popup. Allow popups and retry.`,
             );
             return;
           }
 
-          const oauthResult = await waitForGmailOauthResult(
+          const oauthResult = await waitForOauthResult(
             oauthStart.state,
             popup,
+            providerName,
+            GMAIL_OAUTH_RESULT_TYPE,
           );
           if (oauthResult.error) {
-            throw new Error(`Gmail OAuth failed: ${oauthResult.error}`);
+            throw new Error(
+              `${providerName} OAuth failed: ${oauthResult.error}`,
+            );
           }
           if (!oauthResult.code) {
             throw new Error(
-              "Gmail OAuth did not return an authorization code.",
+              `${providerName} OAuth did not return an authorization code.`,
             );
           }
 
@@ -431,7 +458,7 @@ export const TrackingInboxPage: React.FC = () => {
       provider,
       refresh,
       searchDays,
-      waitForGmailOauthResult,
+      waitForOauthResult,
     ],
   );
 
@@ -678,7 +705,11 @@ export const TrackingInboxPage: React.FC = () => {
                   <SelectContent>
                     {PROVIDER_OPTIONS.map((option) => (
                       <SelectItem key={option} value={option}>
-                        {option}
+                        {option === "outlook"
+                          ? "Outlook Web (Peruz)"
+                          : option === "gmail"
+                            ? "Gmail"
+                            : "IMAP (coming later)"}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -695,8 +726,10 @@ export const TrackingInboxPage: React.FC = () => {
               </div>
             </div>
             <p className="text-xs text-muted-foreground">
-              Gmail connect uses Google OAuth popup and stores credentials
-              server-side. No manual refresh token paste is needed.
+              Outlook reads visible inbox rows from your locally logged-in
+              browser through Peruz. It stores message metadata in your JobOps
+              database and uses no OAuth registration or LLM tokens. Keep an
+              Outlook Mail tab open when connecting or syncing.
             </p>
 
             <div className="grid gap-3 md:grid-cols-4">

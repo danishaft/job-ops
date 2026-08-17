@@ -137,6 +137,13 @@ const pipelineRunsHasConfigSnapshot = tableHasColumn(
 const pipelineRunsHasTenantId = tableHasColumn("pipeline_runs", "tenant_id");
 const jobsHasPdfRegenerating = tableHasColumn("jobs", "pdf_regenerating");
 const jobsHasJobBrief = tableHasColumn("jobs", "job_brief");
+const jobsHasOpportunityType = tableHasColumn("jobs", "opportunity_type");
+const jobsHasOpportunityRoute = tableHasColumn("jobs", "opportunity_route");
+const jobsHasOpportunitySignals = tableHasColumn("jobs", "opportunity_signals");
+const jobsHasOpportunityProvenance = tableHasColumn(
+  "jobs",
+  "opportunity_provenance",
+);
 const watchlistJobStatesHasUserId = tableHasColumn(
   "watchlist_job_states",
   "user_id",
@@ -218,6 +225,10 @@ const migrations = [
     source_job_id TEXT,
     job_url_direct TEXT,
     date_posted TEXT,
+    opportunity_type TEXT NOT NULL DEFAULT 'open_role',
+    opportunity_route TEXT NOT NULL DEFAULT 'apply_then_contact',
+    opportunity_signals TEXT NOT NULL DEFAULT '{}',
+    opportunity_provenance TEXT NOT NULL DEFAULT '[]',
     job_type TEXT,
     salary_source TEXT,
     salary_interval TEXT,
@@ -279,6 +290,34 @@ const migrations = [
     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
   )`,
+
+  `CREATE TABLE IF NOT EXISTS tailoring_audit_runs (
+    id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL DEFAULT 'tenant_default',
+    user_id TEXT,
+    job_id TEXT NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('completed', 'failed')),
+    provider TEXT,
+    model TEXT,
+    prompt_version TEXT NOT NULL,
+    source_resume_fingerprint TEXT NOT NULL,
+    output_fingerprint TEXT,
+    duration_ms INTEGER NOT NULL,
+    started_at INTEGER NOT NULL,
+    completed_at INTEGER NOT NULL,
+    applied_fields TEXT NOT NULL DEFAULT '[]',
+    evidence TEXT NOT NULL DEFAULT '[]',
+    claims TEXT NOT NULL DEFAULT '[]',
+    validation TEXT,
+    error_message TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE
+  )`,
+
+  `CREATE INDEX IF NOT EXISTS idx_tailoring_audit_runs_tenant_user_job_created
+   ON tailoring_audit_runs(tenant_id, user_id, job_id, created_at)`,
 
   `CREATE TABLE IF NOT EXISTS pipeline_runs (
     id TEXT PRIMARY KEY,
@@ -600,6 +639,69 @@ const migrations = [
   `CREATE INDEX IF NOT EXISTS idx_job_notes_job_updated
     ON job_notes(job_id, updated_at)`,
 
+  `CREATE TABLE IF NOT EXISTS job_contacts (
+    id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL DEFAULT 'tenant_default',
+    user_id TEXT,
+    job_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    title TEXT NOT NULL,
+    company TEXT NOT NULL,
+    team TEXT,
+    role TEXT NOT NULL CHECK(role IN ('warm_referrer', 'decision_maker', 'founder', 'engineering_leader', 'team_member', 'recruiter')),
+    status TEXT NOT NULL DEFAULT 'candidate' CHECK(status IN ('candidate', 'selected', 'contacted', 'replied', 'not_relevant')),
+    relationship_strength TEXT NOT NULL DEFAULT 'unknown' CHECK(relationship_strength IN ('unknown', 'none', 'weak', 'warm')),
+    relevance_score INTEGER NOT NULL DEFAULT 0 CHECK(relevance_score BETWEEN 0 AND 100),
+    relevance_reason TEXT NOT NULL,
+    evidence_summary TEXT NOT NULL,
+    source_url TEXT NOT NULL,
+    linkedin_url TEXT,
+    x_url TEXT,
+    email TEXT,
+    email_confidence TEXT NOT NULL DEFAULT 'unknown' CHECK(email_confidence IN ('unknown', 'verified')),
+    is_primary INTEGER NOT NULL DEFAULT 0,
+    notes TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE
+  )`,
+
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_job_contacts_job_source_unique
+    ON job_contacts(tenant_id, user_id, job_id, source_url)`,
+
+  `CREATE INDEX IF NOT EXISTS idx_job_contacts_job_score
+    ON job_contacts(tenant_id, user_id, job_id, relevance_score)`,
+
+  `CREATE TABLE IF NOT EXISTS job_outreach (
+    id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL DEFAULT 'tenant_default',
+    user_id TEXT,
+    job_id TEXT NOT NULL,
+    contact_id TEXT NOT NULL,
+    purpose TEXT NOT NULL CHECK(purpose IN ('referral_request', 'application_follow_up', 'direct_application', 'speculative_outreach', 'contributor_follow_up')),
+    channel TEXT NOT NULL CHECK(channel IN ('email', 'linkedin', 'x', 'other')),
+    status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft', 'sent', 'replied', 'closed')),
+    subject TEXT NOT NULL DEFAULT '',
+    body TEXT NOT NULL,
+    sent_at INTEGER,
+    follow_up_at INTEGER,
+    replied_at INTEGER,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE,
+    FOREIGN KEY (contact_id) REFERENCES job_contacts(id) ON DELETE CASCADE
+  )`,
+
+  `CREATE INDEX IF NOT EXISTS idx_job_outreach_job_status
+    ON job_outreach(tenant_id, user_id, job_id, status)`,
+
+  `CREATE INDEX IF NOT EXISTS idx_job_outreach_follow_up
+    ON job_outreach(tenant_id, user_id, follow_up_at)`,
+
   `CREATE TABLE IF NOT EXISTS interviews (
     id TEXT PRIMARY KEY,
     tenant_id TEXT NOT NULL DEFAULT 'tenant_default',
@@ -615,7 +717,7 @@ const migrations = [
   `CREATE TABLE IF NOT EXISTS post_application_integrations (
     id TEXT PRIMARY KEY,
     tenant_id TEXT NOT NULL DEFAULT 'tenant_default',
-    provider TEXT NOT NULL CHECK(provider IN ('gmail', 'imap')),
+    provider TEXT NOT NULL CHECK(provider IN ('gmail', 'outlook', 'imap')),
     account_key TEXT NOT NULL DEFAULT 'default',
     display_name TEXT,
     status TEXT NOT NULL DEFAULT 'disconnected' CHECK(status IN ('disconnected', 'connected', 'error')),
@@ -632,7 +734,7 @@ const migrations = [
   `CREATE TABLE IF NOT EXISTS post_application_sync_runs (
     id TEXT PRIMARY KEY,
     tenant_id TEXT NOT NULL DEFAULT 'tenant_default',
-    provider TEXT NOT NULL CHECK(provider IN ('gmail', 'imap')),
+    provider TEXT NOT NULL CHECK(provider IN ('gmail', 'outlook', 'imap')),
     account_key TEXT NOT NULL DEFAULT 'default',
     integration_id TEXT,
     status TEXT NOT NULL DEFAULT 'running' CHECK(status IN ('running', 'completed', 'failed', 'cancelled')),
@@ -656,7 +758,7 @@ const migrations = [
   `CREATE TABLE IF NOT EXISTS post_application_messages (
     id TEXT PRIMARY KEY,
     tenant_id TEXT NOT NULL DEFAULT 'tenant_default',
-    provider TEXT NOT NULL CHECK(provider IN ('gmail', 'imap')),
+    provider TEXT NOT NULL CHECK(provider IN ('gmail', 'outlook', 'imap')),
     account_key TEXT NOT NULL DEFAULT 'default',
     integration_id TEXT,
     sync_run_id TEXT,
@@ -860,6 +962,10 @@ const migrations = [
     source_job_id TEXT,
     job_url_direct TEXT,
     date_posted TEXT,
+    opportunity_type TEXT NOT NULL DEFAULT 'open_role',
+    opportunity_route TEXT NOT NULL DEFAULT 'apply_then_contact',
+    opportunity_signals TEXT NOT NULL DEFAULT '{}',
+    opportunity_provenance TEXT NOT NULL DEFAULT '[]',
     job_type TEXT,
     salary_source TEXT,
     salary_interval TEXT,
@@ -924,7 +1030,9 @@ const migrations = [
     FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
   )`,
   `INSERT OR REPLACE INTO jobs_new (
-    id, tenant_id, source, source_job_id, job_url_direct, date_posted, job_type, salary_source, salary_interval,
+    id, tenant_id, source, source_job_id, job_url_direct, date_posted,
+    opportunity_type, opportunity_route, opportunity_signals, opportunity_provenance,
+    job_type, salary_source, salary_interval,
     salary_min_amount, salary_max_amount, salary_currency, is_remote, job_level, job_function, listing_type,
     emails, company_industry, company_logo, company_url_direct, company_addresses, company_num_employees,
     company_revenue, company_description, skills, experience_range, company_rating, company_reviews_count,
@@ -936,7 +1044,12 @@ const migrations = [
     applied_at, created_at, updated_at
   )
   SELECT
-    id, ${tableHasColumn("jobs", "tenant_id") ? `COALESCE(tenant_id, ${sqlString(DEFAULT_TENANT_ID)})` : sqlString(DEFAULT_TENANT_ID)}, source, source_job_id, job_url_direct, date_posted, job_type, salary_source, salary_interval,
+    id, ${tableHasColumn("jobs", "tenant_id") ? `COALESCE(tenant_id, ${sqlString(DEFAULT_TENANT_ID)})` : sqlString(DEFAULT_TENANT_ID)}, source, source_job_id, job_url_direct, date_posted,
+    ${jobsHasOpportunityType ? "opportunity_type" : "'open_role'"},
+    ${jobsHasOpportunityRoute ? "opportunity_route" : "'apply_then_contact'"},
+    ${jobsHasOpportunitySignals ? "opportunity_signals" : "'{}'"},
+    ${jobsHasOpportunityProvenance ? "opportunity_provenance" : "'[]'"},
+    job_type, salary_source, salary_interval,
     salary_min_amount, salary_max_amount, salary_currency, is_remote, job_level, job_function, listing_type,
     emails, company_industry, company_logo, company_url_direct, company_addresses, company_num_employees,
     company_revenue, company_description, skills, experience_range, company_rating, company_reviews_count,
@@ -1249,6 +1362,8 @@ function ensureTenantColumns(): void {
     "stage_events",
     "tasks",
     "job_notes",
+    "job_contacts",
+    "job_outreach",
     "interviews",
     "job_chat_threads",
     "job_chat_messages",
@@ -1280,6 +1395,8 @@ function ensurePrivateUserColumns(): void {
     "stage_events",
     "tasks",
     "job_notes",
+    "job_contacts",
+    "job_outreach",
     "interviews",
     "pipeline_runs",
     "settings",
@@ -1324,7 +1441,12 @@ function ensurePrivateUserColumns(): void {
     backfillUserFromTenantOwner(tableName);
   }
 
-  for (const tableName of ["job_documents", "tracer_links"]) {
+  for (const tableName of [
+    "job_documents",
+    "tracer_links",
+    "job_contacts",
+    "job_outreach",
+  ]) {
     backfillUserFromParent({
       tableName,
       parentTableName: "jobs",
@@ -1514,7 +1636,7 @@ function rebuildPostApplicationPrivateTables(): void {
         id TEXT PRIMARY KEY,
         tenant_id TEXT NOT NULL DEFAULT 'tenant_default',
         user_id TEXT,
-        provider TEXT NOT NULL CHECK(provider IN ('gmail', 'imap')),
+        provider TEXT NOT NULL CHECK(provider IN ('gmail', 'outlook', 'imap')),
         account_key TEXT NOT NULL DEFAULT 'default',
         display_name TEXT,
         status TEXT NOT NULL DEFAULT 'disconnected' CHECK(status IN ('disconnected', 'connected', 'error')),
@@ -1545,7 +1667,7 @@ function rebuildPostApplicationPrivateTables(): void {
         id TEXT PRIMARY KEY,
         tenant_id TEXT NOT NULL DEFAULT 'tenant_default',
         user_id TEXT,
-        provider TEXT NOT NULL CHECK(provider IN ('gmail', 'imap')),
+        provider TEXT NOT NULL CHECK(provider IN ('gmail', 'outlook', 'imap')),
         account_key TEXT NOT NULL DEFAULT 'default',
         integration_id TEXT,
         sync_run_id TEXT,
@@ -1636,6 +1758,69 @@ function rebuildPostApplicationPrivateTables(): void {
   }
 }
 
+function ensureOutlookPostApplicationSyncRuns(): void {
+  if (!tableExists("post_application_sync_runs")) return;
+  const table = sqlite
+    .prepare(
+      "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'post_application_sync_runs'",
+    )
+    .get() as { sql?: string } | undefined;
+  if (table?.sql?.includes("'outlook'")) return;
+  if (!tableHasColumn("post_application_sync_runs", "user_id")) return;
+
+  sqlite.exec("PRAGMA foreign_keys = OFF");
+  try {
+    sqlite.exec(`
+      DROP TABLE IF EXISTS post_application_sync_runs_new;
+      CREATE TABLE post_application_sync_runs_new (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL DEFAULT 'tenant_default',
+        user_id TEXT,
+        provider TEXT NOT NULL CHECK(provider IN ('gmail', 'outlook', 'imap')),
+        account_key TEXT NOT NULL DEFAULT 'default',
+        integration_id TEXT,
+        status TEXT NOT NULL DEFAULT 'running' CHECK(status IN ('running', 'completed', 'failed', 'cancelled')),
+        started_at INTEGER NOT NULL,
+        completed_at INTEGER,
+        messages_discovered INTEGER NOT NULL DEFAULT 0,
+        messages_relevant INTEGER NOT NULL DEFAULT 0,
+        messages_classified INTEGER NOT NULL DEFAULT 0,
+        messages_matched INTEGER NOT NULL DEFAULT 0,
+        messages_approved INTEGER NOT NULL DEFAULT 0,
+        messages_denied INTEGER NOT NULL DEFAULT 0,
+        messages_errored INTEGER NOT NULL DEFAULT 0,
+        error_code TEXT,
+        error_message TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY (integration_id) REFERENCES post_application_integrations(id) ON DELETE SET NULL
+      );
+      INSERT INTO post_application_sync_runs_new (
+        id, tenant_id, user_id, provider, account_key, integration_id, status,
+        started_at, completed_at, messages_discovered, messages_relevant,
+        messages_classified, messages_matched, messages_approved,
+        messages_denied, messages_errored, error_code, error_message,
+        created_at, updated_at
+      )
+      SELECT
+        id, tenant_id, user_id, provider, account_key, integration_id, status,
+        started_at, completed_at, messages_discovered, messages_relevant,
+        messages_classified, messages_matched, messages_approved,
+        messages_denied, messages_errored, error_code, error_message,
+        created_at, updated_at
+      FROM post_application_sync_runs;
+      DROP TABLE post_application_sync_runs;
+      ALTER TABLE post_application_sync_runs_new RENAME TO post_application_sync_runs;
+      CREATE INDEX IF NOT EXISTS idx_post_app_sync_runs_provider_account_started_at
+        ON post_application_sync_runs(provider, account_key, started_at);
+    `);
+  } finally {
+    sqlite.exec("PRAGMA foreign_keys = ON");
+  }
+}
+
 function seedLegacyOwnerFromBasicAuth(): void {
   const existing = sqlite
     .prepare("SELECT count(*) AS count FROM users")
@@ -1719,6 +1904,7 @@ ensureTenantColumns();
 seedLegacyOwnerFromBasicAuth();
 ensurePrivateUserColumns();
 rebuildPostApplicationPrivateTables();
+ensureOutlookPostApplicationSyncRuns();
 rebuildSettingsTable();
 seedLegacyOnboardingMigration();
 ensureTracerLinksUniqueIndex();
@@ -1731,6 +1917,10 @@ sqlite.exec("DROP INDEX IF EXISTS idx_jobs_tenant_job_url_unique");
 sqlite.exec("DROP INDEX IF EXISTS idx_jobs_tenant_user_job_url_unique");
 sqlite.exec(
   "CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_tenant_user_job_url_unique ON jobs(tenant_id, coalesce(user_id, ''), job_url)",
+);
+sqlite.exec("DROP INDEX IF EXISTS idx_job_contacts_job_source_unique");
+sqlite.exec(
+  "CREATE UNIQUE INDEX IF NOT EXISTS idx_job_contacts_job_source_unique ON job_contacts(tenant_id, coalesce(user_id, ''), job_id, source_url)",
 );
 sqlite.exec("DROP INDEX IF EXISTS idx_jobs_tenant_status");
 sqlite.exec(

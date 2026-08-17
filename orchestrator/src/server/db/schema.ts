@@ -12,12 +12,22 @@ import {
   JOB_CHAT_MESSAGE_ROLES,
   JOB_CHAT_MESSAGE_STATUSES,
   JOB_CHAT_RUN_STATUSES,
+  JOB_CONTACT_EMAIL_CONFIDENCE_VALUES,
+  JOB_CONTACT_RELATIONSHIP_STRENGTHS,
+  JOB_CONTACT_ROLES,
+  JOB_CONTACT_STATUSES,
+  JOB_OUTREACH_CHANNELS,
+  JOB_OUTREACH_PURPOSES,
+  JOB_OUTREACH_STATUSES,
+  OPPORTUNITY_ROUTES,
+  OPPORTUNITY_TYPES,
   POST_APPLICATION_INTEGRATION_STATUSES,
   POST_APPLICATION_MESSAGE_TYPES,
   POST_APPLICATION_PROCESSING_STATUSES,
   POST_APPLICATION_PROVIDERS,
   POST_APPLICATION_RELEVANCE_DECISIONS,
   POST_APPLICATION_SYNC_RUN_STATUSES,
+  TAILORING_AUDIT_RUN_STATUSES,
 } from "@shared/types";
 import { sql } from "drizzle-orm";
 import {
@@ -175,6 +185,20 @@ export const jobs = sqliteTable(
     sourceJobId: text("source_job_id"),
     jobUrlDirect: text("job_url_direct"),
     datePosted: text("date_posted"),
+    opportunityType: text("opportunity_type", {
+      enum: OPPORTUNITY_TYPES,
+    })
+      .notNull()
+      .default("open_role"),
+    opportunityRoute: text("opportunity_route", {
+      enum: OPPORTUNITY_ROUTES,
+    })
+      .notNull()
+      .default("apply_then_contact"),
+    opportunitySignals: text("opportunity_signals").notNull().default("{}"),
+    opportunityProvenance: text("opportunity_provenance")
+      .notNull()
+      .default("[]"),
     title: text("title").notNull(),
     employer: text("employer").notNull(),
     employerUrl: text("employer_url"),
@@ -277,6 +301,43 @@ export const jobs = sqliteTable(
   }),
 );
 
+export const tailoringAuditRuns = sqliteTable(
+  "tailoring_audit_runs",
+  {
+    id: text("id").primaryKey(),
+    tenantId: text("tenant_id")
+      .notNull()
+      .default("tenant_default")
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    userId: text("user_id").references(() => users.id, {
+      onDelete: "cascade",
+    }),
+    jobId: text("job_id")
+      .notNull()
+      .references(() => jobs.id, { onDelete: "cascade" }),
+    status: text("status", { enum: TAILORING_AUDIT_RUN_STATUSES }).notNull(),
+    provider: text("provider"),
+    model: text("model"),
+    promptVersion: text("prompt_version").notNull(),
+    sourceResumeFingerprint: text("source_resume_fingerprint").notNull(),
+    outputFingerprint: text("output_fingerprint"),
+    durationMs: integer("duration_ms").notNull(),
+    startedAt: integer("started_at", { mode: "number" }).notNull(),
+    completedAt: integer("completed_at", { mode: "number" }).notNull(),
+    appliedFields: text("applied_fields").notNull().default("[]"),
+    evidence: text("evidence").notNull().default("[]"),
+    claims: text("claims").notNull().default("[]"),
+    validation: text("validation"),
+    errorMessage: text("error_message"),
+    createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
+  },
+  (table) => ({
+    tenantUserJobCreatedIndex: index(
+      "idx_tailoring_audit_runs_tenant_user_job_created",
+    ).on(table.tenantId, table.userId, table.jobId, table.createdAt),
+  }),
+);
+
 export const stageEvents = sqliteTable("stage_events", {
   id: text("id").primaryKey(),
   tenantId: text("tenant_id")
@@ -342,6 +403,113 @@ export const jobNotes = sqliteTable(
     jobUpdatedIndex: index("idx_job_notes_job_updated").on(
       table.jobId,
       table.updatedAt,
+    ),
+  }),
+);
+
+export const jobContacts = sqliteTable(
+  "job_contacts",
+  {
+    id: text("id").primaryKey(),
+    tenantId: text("tenant_id")
+      .notNull()
+      .default("tenant_default")
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    userId: text("user_id").references(() => users.id, {
+      onDelete: "cascade",
+    }),
+    jobId: text("job_id")
+      .notNull()
+      .references(() => jobs.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    title: text("title").notNull(),
+    company: text("company").notNull(),
+    team: text("team"),
+    role: text("role", { enum: JOB_CONTACT_ROLES }).notNull(),
+    status: text("status", { enum: JOB_CONTACT_STATUSES })
+      .notNull()
+      .default("candidate"),
+    relationshipStrength: text("relationship_strength", {
+      enum: JOB_CONTACT_RELATIONSHIP_STRENGTHS,
+    })
+      .notNull()
+      .default("unknown"),
+    relevanceScore: integer("relevance_score").notNull().default(0),
+    relevanceReason: text("relevance_reason").notNull(),
+    evidenceSummary: text("evidence_summary").notNull(),
+    sourceUrl: text("source_url").notNull(),
+    linkedinUrl: text("linkedin_url"),
+    xUrl: text("x_url"),
+    email: text("email"),
+    emailConfidence: text("email_confidence", {
+      enum: JOB_CONTACT_EMAIL_CONFIDENCE_VALUES,
+    })
+      .notNull()
+      .default("unknown"),
+    isPrimary: integer("is_primary", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    notes: text("notes"),
+    createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
+    updatedAt: text("updated_at").notNull().default(sql`(datetime('now'))`),
+  },
+  (table) => ({
+    jobScoreIndex: index("idx_job_contacts_job_score").on(
+      table.tenantId,
+      table.userId,
+      table.jobId,
+      table.relevanceScore,
+    ),
+    jobSourceUnique: uniqueIndex("idx_job_contacts_job_source_unique").on(
+      table.tenantId,
+      sql`coalesce(${table.userId}, '')`,
+      table.jobId,
+      table.sourceUrl,
+    ),
+  }),
+);
+
+export const jobOutreach = sqliteTable(
+  "job_outreach",
+  {
+    id: text("id").primaryKey(),
+    tenantId: text("tenant_id")
+      .notNull()
+      .default("tenant_default")
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    userId: text("user_id").references(() => users.id, {
+      onDelete: "cascade",
+    }),
+    jobId: text("job_id")
+      .notNull()
+      .references(() => jobs.id, { onDelete: "cascade" }),
+    contactId: text("contact_id")
+      .notNull()
+      .references(() => jobContacts.id, { onDelete: "cascade" }),
+    purpose: text("purpose", { enum: JOB_OUTREACH_PURPOSES }).notNull(),
+    channel: text("channel", { enum: JOB_OUTREACH_CHANNELS }).notNull(),
+    status: text("status", { enum: JOB_OUTREACH_STATUSES })
+      .notNull()
+      .default("draft"),
+    subject: text("subject").notNull().default(""),
+    body: text("body").notNull(),
+    sentAt: integer("sent_at", { mode: "number" }),
+    followUpAt: integer("follow_up_at", { mode: "number" }),
+    repliedAt: integer("replied_at", { mode: "number" }),
+    createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
+    updatedAt: text("updated_at").notNull().default(sql`(datetime('now'))`),
+  },
+  (table) => ({
+    jobStatusIndex: index("idx_job_outreach_job_status").on(
+      table.tenantId,
+      table.userId,
+      table.jobId,
+      table.status,
+    ),
+    followUpIndex: index("idx_job_outreach_follow_up").on(
+      table.tenantId,
+      table.userId,
+      table.followUpAt,
     ),
   }),
 );

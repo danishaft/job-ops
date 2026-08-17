@@ -97,6 +97,8 @@ export interface PipelineConfig {
   enableScoring?: boolean;
   enableImporting?: boolean;
   enableAutoTailoring?: boolean;
+  includeOpportunityCatalog?: boolean;
+  prepareTopMatches?: boolean;
   // Per-run filter over the current user's saved Watchlist sources.
   // undefined/null = include every Watchlist source the user has saved
   // (legacy behavior pre-#621). [] = explicitly exclude all Watchlist
@@ -110,6 +112,8 @@ export interface PipelineRunConfigSnapshot {
   minSuitabilityScore: number;
   sources: ExtractorSourceId[];
   locationIntent: LocationIntent;
+  includeOpportunityCatalog?: boolean;
+  prepareTopMatches?: boolean;
 }
 
 export interface PipelineRun {
@@ -141,6 +145,8 @@ export interface PipelineRunRequestedConfig {
   enableScoring: boolean;
   enableImporting: boolean;
   enableAutoTailoring: boolean;
+  includeOpportunityCatalog?: boolean;
+  prepareTopMatches?: boolean;
   // null = run did not constrain Watchlist (legacy / pre-#621 behavior);
   // [] = explicitly disabled all Watchlist sources;
   // non-empty = subset of the user's saved Watchlist source IDs.

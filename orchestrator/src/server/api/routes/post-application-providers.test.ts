@@ -14,6 +14,9 @@ describe.sequential("Post-Application Provider actions API", () => {
   const originalClientId = process.env.GMAIL_OAUTH_CLIENT_ID;
   const originalClientSecret = process.env.GMAIL_OAUTH_CLIENT_SECRET;
   const originalRedirectUri = process.env.GMAIL_OAUTH_REDIRECT_URI;
+  const originalOutlookClientId = process.env.OUTLOOK_OAUTH_CLIENT_ID;
+  const originalOutlookTenant = process.env.OUTLOOK_OAUTH_TENANT;
+  const originalOutlookRedirectUri = process.env.OUTLOOK_OAUTH_REDIRECT_URI;
   const originalOauthStateMaxEntries =
     process.env.POST_APPLICATION_OAUTH_STATE_MAX_ENTRIES;
   const originalOauthStateTtlMs =
@@ -27,6 +30,9 @@ describe.sequential("Post-Application Provider actions API", () => {
     process.env.GMAIL_OAUTH_CLIENT_ID = originalClientId;
     process.env.GMAIL_OAUTH_CLIENT_SECRET = originalClientSecret;
     process.env.GMAIL_OAUTH_REDIRECT_URI = originalRedirectUri;
+    process.env.OUTLOOK_OAUTH_CLIENT_ID = originalOutlookClientId;
+    process.env.OUTLOOK_OAUTH_TENANT = originalOutlookTenant;
+    process.env.OUTLOOK_OAUTH_REDIRECT_URI = originalOutlookRedirectUri;
     process.env.POST_APPLICATION_OAUTH_STATE_MAX_ENTRIES =
       originalOauthStateMaxEntries;
     process.env.POST_APPLICATION_OAUTH_STATE_TTL_MS = originalOauthStateTtlMs;
@@ -237,6 +243,33 @@ describe.sequential("Post-Application Provider actions API", () => {
     expect(body.error.code).toBe("INVALID_REQUEST");
     expect(body.error.message).toContain("invalid or expired");
     expect(typeof body.meta.requestId).toBe("string");
+  });
+
+  it("starts Outlook OAuth with read-only scopes and PKCE", async () => {
+    process.env.OUTLOOK_OAUTH_CLIENT_ID = "outlook-client-id";
+    process.env.OUTLOOK_OAUTH_TENANT = "consumers";
+    process.env.OUTLOOK_OAUTH_REDIRECT_URI = `${baseUrl}/oauth/outlook/callback`;
+
+    const res = await fetch(
+      `${baseUrl}/api/post-application/providers/outlook/oauth/start?accountKey=primary`,
+    );
+    const body = await res.json();
+    const authorizationUrl = new URL(body.data.authorizationUrl);
+
+    expect(res.status).toBe(200);
+    expect(body.data.provider).toBe("outlook");
+    expect(body.data.accountKey).toBe("primary");
+    expect(authorizationUrl.origin).toBe("https://login.microsoftonline.com");
+    expect(authorizationUrl.pathname).toContain(
+      "/consumers/oauth2/v2.0/authorize",
+    );
+    expect(authorizationUrl.searchParams.get("scope")).toBe(
+      "offline_access User.Read Mail.Read",
+    );
+    expect(authorizationUrl.searchParams.get("code_challenge_method")).toBe(
+      "S256",
+    );
+    expect(authorizationUrl.searchParams.get("code_challenge")).toBeTruthy();
   });
 
   it("expires oauth states based on configured ttl", async () => {

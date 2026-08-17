@@ -15,6 +15,10 @@ import { inferManualJobDetails } from "@server/services/manualJob";
 import { getProfile } from "@server/services/profile";
 import { scoreJobSuitability } from "@server/services/scorer";
 import { settingsRegistry } from "@shared/settings-registry";
+import {
+  OPPORTUNITY_ELIGIBILITY,
+  OPPORTUNITY_WARM_CONNECTION_STATUSES,
+} from "@shared/types";
 import { type Request, type Response, Router } from "express";
 import { JSDOM } from "jsdom";
 import { z } from "zod";
@@ -54,6 +58,20 @@ const manualJobImportSchema = z.object({
     disciplines: z.string().trim().max(200).optional(),
     degreeRequired: z.string().trim().max(200).optional(),
     starting: z.string().trim().max(200).optional(),
+    opportunitySignals: z
+      .object({
+        hasOpenRole: z.boolean().optional(),
+        hasWarmConnection: z.boolean().optional(),
+        warmConnectionStatus: z
+          .enum(OPPORTUNITY_WARM_CONNECTION_STATUSES)
+          .optional(),
+        hasDirectApplicationEmail: z.boolean().optional(),
+        hasStrongHiringSignal: z.boolean().optional(),
+        isTalentNetwork: z.boolean().optional(),
+        isOpenSourceCompany: z.boolean().optional(),
+        eligibility: z.enum(OPPORTUNITY_ELIGIBILITY).optional(),
+      })
+      .optional(),
   }),
 });
 
@@ -314,6 +332,7 @@ manualJobsRouter.post("/import", async (req: Request, res: Response) => {
       disciplines: cleanOptional(job.disciplines) ?? undefined,
       degreeRequired: cleanOptional(job.degreeRequired) ?? undefined,
       starting: cleanOptional(job.starting) ?? undefined,
+      opportunitySignals: job.opportunitySignals,
     });
 
     const skipTailoring = await resolveSkipTailoring(input.skipTailoring);

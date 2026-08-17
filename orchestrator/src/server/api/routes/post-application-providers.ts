@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { badRequest, serviceUnavailable, upstreamError } from "@infra/errors";
 import { asyncRoute, fail, ok } from "@infra/http";
 import { logger } from "@infra/logger";
@@ -42,14 +42,18 @@ const oauthExchangeBodySchema = z.object({
 export const postApplicationProvidersRouter = Router();
 
 const GMAIL_OAUTH_SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
+const OUTLOOK_OAUTH_SCOPE = "offline_access User.Read Mail.Read";
 const oauthStateStore = new Map<
   string,
   {
+    provider: "gmail" | "outlook";
     accountKey: string;
     tenantId: string;
     userId: string | null;
     redirectUri: string;
     createdAt: number;
+    codeVerifier?: string;
+    authorityTenant?: string;
   }
 >();
 
@@ -101,11 +105,14 @@ function enforceOauthStateStoreLimit(): void {
 function setOauthState(
   state: string,
   entry: {
+    provider: "gmail" | "outlook";
     accountKey: string;
     tenantId: string;
     userId: string | null;
     redirectUri: string;
     createdAt: number;
+    codeVerifier?: string;
+    authorityTenant?: string;
   },
 ): void {
   cleanupOauthState();
@@ -143,6 +150,36 @@ function resolveGmailOauthConfig(req: Request): {
     clientSecret,
     redirectUri,
   };
+}
+
+function resolveOutlookOauthConfig(req: Request): {
+  clientId: string;
+  tenant: string;
+  redirectUri: string;
+} {
+  const clientId = asNonEmptyString(process.env.OUTLOOK_OAUTH_CLIENT_ID);
+  if (!clientId) {
+    throw serviceUnavailable(
+      "Outlook OAuth is not configured. Missing OUTLOOK_OAUTH_CLIENT_ID.",
+    );
+  }
+  const tenant =
+    asNonEmptyString(process.env.OUTLOOK_OAUTH_TENANT) ?? "consumers";
+  const configuredRedirectUri = asNonEmptyString(
+    process.env.OUTLOOK_OAUTH_REDIRECT_URI,
+  );
+  const origin = `${req.protocol}://${req.get("host")}`;
+  return {
+    clientId,
+    tenant,
+    redirectUri: configuredRedirectUri ?? `${origin}/oauth/outlook/callback`,
+  };
+}
+
+function createPkce(): { verifier: string; challenge: string } {
+  const verifier = randomBytes(48).toString("base64url");
+  const challenge = createHash("sha256").update(verifier).digest("base64url");
+  return { verifier, challenge };
 }
 
 async function exchangeGmailAuthorizationCode(args: {
@@ -229,6 +266,89 @@ async function fetchGmailUserProfile(accessToken: string): Promise<{
   };
 }
 
+async function exchangeOutlookAuthorizationCode(args: {
+  code: string;
+  redirectUri: string;
+  clientId: string;
+  tenant: string;
+  codeVerifier: string;
+}): Promise<{
+  refreshToken: string;
+  accessToken: string;
+  expiryDate?: number;
+  scope?: string;
+  tokenType?: string;
+  tenant: string;
+}> {
+  const body = new URLSearchParams({
+    code: args.code,
+    client_id: args.clientId,
+    redirect_uri: args.redirectUri,
+    grant_type: "authorization_code",
+    code_verifier: args.codeVerifier,
+    scope: OUTLOOK_OAUTH_SCOPE,
+  });
+  const response = await fetch(
+    `https://login.microsoftonline.com/${encodeURIComponent(args.tenant)}/oauth2/v2.0/token`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body,
+    },
+  );
+  const data = (await response.json().catch(() => ({}))) as Record<
+    string,
+    unknown
+  >;
+  if (!response.ok) {
+    throw upstreamError("Microsoft OAuth token exchange failed.");
+  }
+  const refreshToken = asNonEmptyString(data.refresh_token);
+  const accessToken = asNonEmptyString(data.access_token);
+  if (!refreshToken || !accessToken) {
+    throw upstreamError(
+      "Microsoft OAuth exchange did not return the required tokens.",
+    );
+  }
+  const expiryIn = Number(data.expires_in);
+  return {
+    refreshToken,
+    accessToken,
+    tenant: args.tenant,
+    ...(Number.isFinite(expiryIn)
+      ? { expiryDate: Date.now() + expiryIn * 1000 }
+      : {}),
+    ...(asNonEmptyString(data.scope) ? { scope: String(data.scope) } : {}),
+    ...(asNonEmptyString(data.token_type)
+      ? { tokenType: String(data.token_type) }
+      : {}),
+  };
+}
+
+async function fetchOutlookUserProfile(accessToken: string): Promise<{
+  email?: string;
+  displayName?: string;
+}> {
+  const response = await fetch(
+    "https://graph.microsoft.com/v1.0/me?$select=displayName,mail,userPrincipalName",
+    { headers: { Authorization: `Bearer ${accessToken}` } },
+  );
+  if (!response.ok) return {};
+  const data = (await response.json().catch(() => ({}))) as Record<
+    string,
+    unknown
+  >;
+  const email =
+    asNonEmptyString(data.mail) ??
+    asNonEmptyString(data.userPrincipalName) ??
+    undefined;
+  const displayName = asNonEmptyString(data.displayName) ?? undefined;
+  return {
+    ...(email ? { email } : {}),
+    ...(displayName ? { displayName } : {}),
+  };
+}
+
 postApplicationProvidersRouter.get(
   "/providers/gmail/oauth/start",
   asyncRoute(async (req: Request, res: Response) => {
@@ -241,6 +361,7 @@ postApplicationProvidersRouter.get(
       const scope = getPrivateDataScope();
 
       setOauthState(state, {
+        provider: "gmail",
         accountKey,
         tenantId: scope.tenantId,
         userId: scope.enforceUserIsolation ? scope.userId : null,
@@ -289,6 +410,11 @@ postApplicationProvidersRouter.post(
       }
       oauthStateStore.delete(body.state);
 
+      if (oauthState.provider !== "gmail") {
+        fail(res, badRequest("OAuth state/provider mismatch."));
+        return;
+      }
+
       if (oauthState.accountKey !== accountKey) {
         fail(res, badRequest("OAuth state/account mismatch."));
         return;
@@ -329,6 +455,121 @@ postApplicationProvidersRouter.post(
         initiatedBy: null,
       });
 
+      ok(res, response);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        fail(res, badRequest(error.message, error.flatten()));
+        return;
+      }
+      throw error;
+    }
+  }),
+);
+
+postApplicationProvidersRouter.get(
+  "/providers/outlook/oauth/start",
+  asyncRoute(async (req: Request, res: Response) => {
+    try {
+      cleanupOauthState();
+      const parsed = oauthStartQuerySchema.parse(req.query);
+      const accountKey = parsed.accountKey ?? "default";
+      const oauth = resolveOutlookOauthConfig(req);
+      const state = randomUUID();
+      const pkce = createPkce();
+      const scope = getPrivateDataScope();
+      setOauthState(state, {
+        provider: "outlook",
+        accountKey,
+        tenantId: scope.tenantId,
+        userId: scope.enforceUserIsolation ? scope.userId : null,
+        redirectUri: oauth.redirectUri,
+        createdAt: Date.now(),
+        codeVerifier: pkce.verifier,
+        authorityTenant: oauth.tenant,
+      });
+
+      const authUrl = new URL(
+        `https://login.microsoftonline.com/${encodeURIComponent(oauth.tenant)}/oauth2/v2.0/authorize`,
+      );
+      authUrl.searchParams.set("client_id", oauth.clientId);
+      authUrl.searchParams.set("redirect_uri", oauth.redirectUri);
+      authUrl.searchParams.set("response_type", "code");
+      authUrl.searchParams.set("response_mode", "query");
+      authUrl.searchParams.set("scope", OUTLOOK_OAUTH_SCOPE);
+      authUrl.searchParams.set("state", state);
+      authUrl.searchParams.set("code_challenge", pkce.challenge);
+      authUrl.searchParams.set("code_challenge_method", "S256");
+      ok(res, {
+        provider: "outlook",
+        accountKey,
+        authorizationUrl: authUrl.toString(),
+        state,
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        fail(res, badRequest(error.message, error.flatten()));
+        return;
+      }
+      throw error;
+    }
+  }),
+);
+
+postApplicationProvidersRouter.post(
+  "/providers/outlook/oauth/exchange",
+  asyncRoute(async (req: Request, res: Response) => {
+    try {
+      cleanupOauthState();
+      const body = oauthExchangeBodySchema.parse(req.body ?? {});
+      const accountKey = body.accountKey ?? "default";
+      const oauthState = oauthStateStore.get(body.state);
+      if (!oauthState) {
+        fail(res, badRequest("OAuth state is invalid or expired."));
+        return;
+      }
+      oauthStateStore.delete(body.state);
+      if (oauthState.provider !== "outlook") {
+        fail(res, badRequest("OAuth state/provider mismatch."));
+        return;
+      }
+      if (oauthState.accountKey !== accountKey) {
+        fail(res, badRequest("OAuth state/account mismatch."));
+        return;
+      }
+      const scope = getPrivateDataScope();
+      if (oauthState.tenantId !== scope.tenantId) {
+        fail(res, badRequest("OAuth state/workspace mismatch."));
+        return;
+      }
+      if (scope.enforceUserIsolation && oauthState.userId !== scope.userId) {
+        fail(res, badRequest("OAuth state/user mismatch."));
+        return;
+      }
+      if (!oauthState.codeVerifier || !oauthState.authorityTenant) {
+        fail(res, badRequest("OAuth PKCE state is incomplete."));
+        return;
+      }
+
+      const oauth = resolveOutlookOauthConfig(req);
+      const tokenPayload = await exchangeOutlookAuthorizationCode({
+        code: body.code,
+        redirectUri: oauthState.redirectUri,
+        clientId: oauth.clientId,
+        tenant: oauthState.authorityTenant,
+        codeVerifier: oauthState.codeVerifier,
+      });
+      const profile = await fetchOutlookUserProfile(tokenPayload.accessToken);
+      const response = await executePostApplicationProviderAction({
+        provider: "outlook",
+        action: "connect",
+        accountKey,
+        connectPayload: {
+          accountKey,
+          payload: { ...tokenPayload, ...profile },
+        },
+        syncPayload: undefined,
+        initiatedBy: null,
+      });
       ok(res, response);
     } catch (error) {
       if (error instanceof z.ZodError) {

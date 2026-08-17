@@ -114,6 +114,8 @@ export function toJobListItem(job: WatchlistJobResult): JobListItem {
     id: `${job.source}:${job.sourceJobId}`,
     source: "manual",
     sourceJobId: null,
+    opportunityType: "open_role",
+    opportunityRoute: "apply_then_contact",
     title: job.title,
     employer: job.employer,
     jobUrl: job.jobUrl,

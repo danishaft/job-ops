@@ -164,6 +164,8 @@ export async function runPipeline(config?: {
   workplaceTypes?: Array<"remote" | "hybrid" | "onsite">;
   searchScope?: LocationSearchScope;
   matchStrictness?: LocationMatchStrictness;
+  includeOpportunityCatalog?: boolean;
+  prepareTopMatches?: boolean;
   watchlistSelectedSourceIds?: string[];
 }): Promise<{ message: string }> {
   return fetchApi<{ message: string }>("/pipeline/run", {

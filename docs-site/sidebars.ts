@@ -16,6 +16,7 @@ const sidebars: SidebarsConfig = {
       label: "Workflows",
       items: [
         "workflows/find-jobs-and-apply-workflow",
+        "workflows/targeted-opportunity-workflow",
         "workflows/post-application-workflow",
         "workflows/add-an-extractor",
         "workflows/add-a-visa-sponsor-provider",

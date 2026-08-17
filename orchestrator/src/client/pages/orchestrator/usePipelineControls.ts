@@ -137,10 +137,12 @@ export function usePipelineControls(
           workplaceTypes: config.workplaceTypes,
           searchScope: config.searchScope,
           matchStrictness: config.matchStrictness,
+          includeOpportunityCatalog: true,
+          prepareTopMatches: false,
           watchlistSelectedSourceIds: config.watchlistSelectedSourceIds,
         });
         toast.message("Search started", {
-          description: `Sources: ${config.sources.join(", ")}. This may take a few minutes.`,
+          description: `Sources: ${config.sources.join(", ")} plus the high-signal catalog. Results will be ranked for review without generating resumes.`,
         });
       } catch (error) {
         setIsPipelineRunning(false);

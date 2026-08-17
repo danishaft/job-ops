@@ -31,7 +31,8 @@ Resume Studio reduces that dependency by letting you:
 ## How to use it
 
 1. Open **Resume Studio** from the main navigation.
-2. If this is your first time, click **Import from Reactive Resume**.
+2. If this is your first time, import a PDF, DOCX, Reactive Resume JSON file,
+   or a connected Reactive Resume document.
 3. Edit the left-panel fields directly.
 4. Use the sparkle button beside eligible fields when you want a focused AI draft.
 5. Watch for the local save indicator in the header.
@@ -42,6 +43,11 @@ AI-assisted field editing is available for writing-heavy fields such as headline
 The AI assistant is ephemeral. Closing the field assistant clears that short conversation. Empty fields are filled automatically when the AI response arrives; fields that already contain content show an **Apply** action so you can review the suggestion before it changes the resume.
 
 AI field editing uses the same LLM connection, tailoring model overrides, writing style, and output language settings used by resume tailoring. It edits the reusable baseline resume only; job-specific rewrites still belong in job tailoring and Ghostwriter.
+
+For PDF imports, JobOps extracts both readable text and embedded `http`,
+`https`, and `mailto` link annotations locally. The selected LLM maps a link
+to a profile, employer, or project only when the URL clearly matches the
+visible resume content. Scanned PDFs still need a readable text layer.
 
 When Resume Studio changes, ready jobs with system-generated PDFs are queued for automatic regeneration. Until the queue catches up, those jobs show a `PDF stale` indicator and keep the old PDF available as **View old PDF** / **Download old PDF**.
 
@@ -57,6 +63,10 @@ Current v1 scope:
 
 - Import button fails:
   Verify your Reactive Resume mode, URL, credentials, and selected base resume in **Settings**.
+- A PDF import is missing links:
+  Confirm that the original PDF contains clickable links rather than only
+  printed labels. JobOps ignores unsupported link schemes and malformed PDF
+  annotations. You can restore a missing URL directly in Resume Studio.
 - You already had a local Resume Studio document from an older JobOps build:
   Re-import from a Reactive Resume v5 base resume. Older local documents are no longer auto-converted.
 - Changes do not appear in a generated PDF:

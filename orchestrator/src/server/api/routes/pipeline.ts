@@ -518,6 +518,8 @@ const runPipelineSchema = z.object({
     .optional(),
   searchScope: z.enum(LOCATION_SEARCH_SCOPE_VALUES).optional(),
   matchStrictness: z.enum(LOCATION_MATCH_STRICTNESS_VALUES).optional(),
+  includeOpportunityCatalog: z.boolean().optional(),
+  prepareTopMatches: z.boolean().optional(),
   // Per-#621: optional client-supplied per-run Watchlist source filter.
   // Omitted preserves the legacy "include every saved Watchlist source"
   // behavior; [] disables Watchlist entirely; non-empty restricts to a
@@ -624,6 +626,8 @@ pipelineRouter.post("/run", async (req: Request, res: Response) => {
           scoringInstructions: config.scoringInstructions,
           runBudget: config.runBudget,
           locationIntent,
+          includeOpportunityCatalog: config.includeOpportunityCatalog,
+          prepareTopMatches: config.prepareTopMatches,
           watchlistSelectedSourceIds: config.watchlistSelectedSourceIds,
         },
         {

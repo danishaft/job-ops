@@ -23,6 +23,7 @@ import { getDataDir } from "../config/dataDir";
 import * as jobsRepo from "../repositories/jobs";
 import * as pipelineRepo from "../repositories/pipeline";
 import * as settingsRepo from "../repositories/settings";
+import * as tailoringAuditRepo from "../repositories/tailoring-audit-runs";
 import {
   refundHostedUsageReservation,
   reserveHostedUsage,
@@ -71,6 +72,8 @@ const DEFAULT_CONFIG: PipelineConfig = {
   enableScoring: true,
   enableImporting: true,
   enableAutoTailoring: true,
+  includeOpportunityCatalog: false,
+  prepareTopMatches: true,
 };
 
 function parseProjectIdsCsv(value: string | null | undefined): string[] {
@@ -299,6 +302,8 @@ export async function runPipeline(
     minSuitabilityScore: mergedConfig.minSuitabilityScore,
     sources: mergedConfig.sources,
     locationIntent,
+    includeOpportunityCatalog: mergedConfig.includeOpportunityCatalog,
+    prepareTopMatches: mergedConfig.prepareTopMatches,
   } as const;
 
   let savedDetails: PipelineRunSavedDetails | null = null;
@@ -333,6 +338,8 @@ export async function runPipeline(
       topN: mergedConfig.topN,
       minSuitabilityScore: mergedConfig.minSuitabilityScore,
       sources: mergedConfig.sources,
+      includeOpportunityCatalog: mergedConfig.includeOpportunityCatalog,
+      prepareTopMatches: mergedConfig.prepareTopMatches,
       locationIntent: {
         selectedCountry: locationIntent.selectedCountry,
         cityCount: locationIntent.cityLocations.length,
@@ -506,17 +513,25 @@ export async function runPipeline(
         candidates: jobsToProcess.length,
       });
 
-      await persistResultSummary({
-        stage: "processing",
-        jobsScored: scoredJobs.length,
-        jobsSelected: jobsToProcess.length,
-      });
-      const { processedCount } = await processJobsStep({
-        jobsToProcess,
-        processJob,
-        shouldCancel: () =>
-          getPipelineState(scopeKey).cancelRequestedAt !== null,
-      });
+      let processedCount = 0;
+      if (mergedConfig.prepareTopMatches !== false) {
+        await persistResultSummary({
+          stage: "processing",
+          jobsScored: scoredJobs.length,
+          jobsSelected: jobsToProcess.length,
+        });
+        ({ processedCount } = await processJobsStep({
+          jobsToProcess,
+          processJob,
+          shouldCancel: () =>
+            getPipelineState(scopeKey).cancelRequestedAt !== null,
+        }));
+      } else {
+        pipelineLogger.info("Ranked opportunities ready for human triage", {
+          jobsScored: scoredJobs.length,
+          jobsShortlisted: jobsToProcess.length,
+        });
+      }
       jobsProcessed = processedCount;
 
       resultSummary = updatePipelineRunResultSummary(resultSummary, {
@@ -693,6 +708,26 @@ export async function summarizeJob(
           job.jobDescription || "",
           profile,
         );
+        if (tailoringResult.audit) {
+          const appliedFields = [
+            ...(shouldUpdateSummary ? (["summary"] as const) : []),
+            ...(shouldUpdateHeadline ? (["headline"] as const) : []),
+            ...(shouldUpdateSkills ? (["skills"] as const) : []),
+          ];
+          try {
+            await tailoringAuditRepo.createTailoringAuditRun({
+              jobId: job.id,
+              appliedFields,
+              audit: tailoringResult.audit,
+            });
+          } catch {
+            jobLogger.warn("Failed to persist tailoring audit", {
+              status: tailoringResult.audit.status,
+              validationIssueCount:
+                tailoringResult.audit.validation?.issues.length ?? 0,
+            });
+          }
+        }
         if (tailoringResult.success && tailoringResult.data) {
           tailoringUsageSucceeded = true;
           if (shouldUpdateSummary) {

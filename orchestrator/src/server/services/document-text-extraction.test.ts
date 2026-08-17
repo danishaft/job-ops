@@ -1,14 +1,26 @@
 import JSZip from "jszip";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const pdfDocument = vi.hoisted(() => ({
+  destroy: vi.fn(),
+  getAnnotations: vi.fn(),
+  getDocument: vi.fn(),
+  getPage: vi.fn(),
+}));
+
 vi.mock("pdf-parse", () => ({
   default: vi.fn(),
+}));
+vi.mock("pdfjs-dist/legacy/build/pdf.mjs", () => ({
+  getDocument: pdfDocument.getDocument,
 }));
 
 import pdfParse from "pdf-parse";
 import {
   DocxTextExtractionError,
   extractDocxText,
+  extractPdfDocument,
+  extractPdfLinks,
   extractPdfText,
 } from "./document-text-extraction";
 
@@ -53,6 +65,18 @@ async function makeDocxBuffer(text: string): Promise<Buffer> {
 describe("document text extraction", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    pdfDocument.destroy.mockResolvedValue(undefined);
+    pdfDocument.getAnnotations.mockResolvedValue([]);
+    pdfDocument.getPage.mockResolvedValue({
+      getAnnotations: pdfDocument.getAnnotations,
+    });
+    pdfDocument.getDocument.mockReturnValue({
+      promise: Promise.resolve({
+        numPages: 1,
+        getPage: pdfDocument.getPage,
+        destroy: pdfDocument.destroy,
+      }),
+    });
   });
 
   it("extracts readable PDF text", async () => {
@@ -84,6 +108,35 @@ describe("document text extraction", () => {
     ).rejects.toMatchObject({
       name: "PdfTextExtractionError",
       code: "INVALID_PDF",
+    });
+  });
+
+  it("extracts and deduplicates safe PDF link annotations", async () => {
+    pdfDocument.getAnnotations.mockResolvedValue([
+      { subtype: "Link", url: "https://example.com/project" },
+      { subtype: "Link", unsafeUrl: "mailto:person@example.com" },
+      { subtype: "Link", url: "https://example.com/project" },
+      { subtype: "Link", url: "javascript:alert(1)" },
+      { subtype: "Text", url: "https://example.com/ignored" },
+    ]);
+
+    await expect(extractPdfLinks(Buffer.from("%PDF-1.4"))).resolves.toEqual([
+      "https://example.com/project",
+      "mailto:person@example.com",
+    ]);
+  });
+
+  it("keeps PDF text extraction usable when annotations cannot be read", async () => {
+    vi.mocked(pdfParse).mockResolvedValueOnce(
+      makePdfParseResult("Taylor Quinn\nSenior Engineer"),
+    );
+    pdfDocument.getDocument.mockImplementationOnce(() => {
+      throw new Error("unsupported annotation table");
+    });
+
+    await expect(extractPdfDocument(Buffer.from("%PDF-1.4"))).resolves.toEqual({
+      text: "Taylor Quinn\nSenior Engineer",
+      links: [],
     });
   });
 

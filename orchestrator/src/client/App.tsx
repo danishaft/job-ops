@@ -27,6 +27,7 @@ import { JobPage } from "./pages/JobPage";
 import { OfflinePage } from "./pages/OfflinePage";
 import { OnboardingPage } from "./pages/OnboardingPage";
 import { OrchestratorPage } from "./pages/OrchestratorPage";
+import { OutlookOauthCallbackPage } from "./pages/OutlookOauthCallbackPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { SignInPage } from "./pages/SignInPage";
 import { TracerLinksPage } from "./pages/TracerLinksPage";
@@ -177,6 +178,10 @@ export const App: React.FC = () => {
                 <Route
                   path="/oauth/gmail/callback"
                   element={<GmailOauthCallbackPage />}
+                />
+                <Route
+                  path="/oauth/outlook/callback"
+                  element={<OutlookOauthCallbackPage />}
                 />
                 <Route path="/job/:id" element={<JobPage />} />
                 <Route path="/job/:id/:view" element={<JobPage />} />

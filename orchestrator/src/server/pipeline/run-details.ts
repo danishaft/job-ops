@@ -54,7 +54,11 @@ export function buildRequestedConfigSnapshot(
     enableCrawling: config.enableCrawling !== false,
     enableScoring: config.enableScoring !== false,
     enableImporting: config.enableImporting !== false,
-    enableAutoTailoring: config.enableAutoTailoring !== false,
+    enableAutoTailoring:
+      config.enableAutoTailoring !== false &&
+      config.prepareTopMatches !== false,
+    includeOpportunityCatalog: config.includeOpportunityCatalog === true,
+    prepareTopMatches: config.prepareTopMatches !== false,
     watchlistSelectedSourceIds:
       watchlistFilter === undefined || watchlistFilter === null
         ? null

@@ -1,6 +1,7 @@
 import { logger } from "@infra/logger";
 import * as jobsRepo from "@server/repositories/jobs";
 import { deduplicateJobsByTitleAndEmployer } from "@shared/job-matching.js";
+import { classifyPublicOpportunitySignals } from "@shared/opportunity-routing.js";
 import type { CreateJobInput } from "@shared/types";
 import { progressHelpers } from "../progress";
 
@@ -11,7 +12,11 @@ export async function importJobsStep(args: {
     discovered: args.discoveredJobs.length,
   });
 
-  const dedupedJobs = deduplicateJobsByTitleAndEmployer(args.discoveredJobs);
+  const classifiedJobs = args.discoveredJobs.map((job) => ({
+    ...job,
+    opportunitySignals: classifyPublicOpportunitySignals(job),
+  }));
+  const dedupedJobs = deduplicateJobsByTitleAndEmployer(classifiedJobs);
   const fuzzyMerged = args.discoveredJobs.length - dedupedJobs.length;
 
   if (fuzzyMerged > 0) {

@@ -1,4 +1,8 @@
 import { isAwaitingAiScore } from "@client/components";
+import {
+  getOpportunityRoutePlan,
+  normalizeOpportunitySignals,
+} from "@shared/opportunity-routing.js";
 import type { JobListItem } from "@shared/types.js";
 import { Loader2, XCircle } from "lucide-react";
 import { Tip } from "@/client/components/Tip";
@@ -35,6 +39,15 @@ export const JobRowContent = ({
   const suitabilityTone = getSuitabilityScoreTone(job.suitabilityScore ?? 0);
   const showStalePdf = isPdfStale(job);
   const showRegeneratingPdf = isPdfRegenerating(job);
+  const opportunityPlan = getOpportunityRoutePlan(
+    job.opportunityRoute ?? "apply_then_contact",
+  );
+  const opportunitySignals = normalizeOpportunitySignals(
+    job.opportunitySignals,
+  );
+  const needsConnectionCheck =
+    opportunitySignals.hasOpenRole &&
+    opportunitySignals.warmConnectionStatus === "unknown";
 
   return (
     <div className={cn("flex min-w-0 flex-1 items-center gap-3", className)}>
@@ -63,6 +76,10 @@ export const JobRowContent = ({
           {job.location && (
             <span className="before:content-['_in_']">{job.location}</span>
           )}
+        </div>
+        <div className="mt-1 truncate text-[10px] uppercase tracking-wide text-primary/75">
+          {opportunityPlan.channel} · {opportunityPlan.label}
+          {needsConnectionCheck ? " · Check connection" : ""}
         </div>
         {(job.salary?.trim() || showRegeneratingPdf || showStalePdf) && (
           <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1.5">

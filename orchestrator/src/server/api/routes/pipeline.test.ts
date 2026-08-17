@@ -940,6 +940,8 @@ describe.sequential("Pipeline API routes", () => {
         searchScope: "selected_only",
         matchStrictness: "exact_only",
         watchlistSelectedSourceIds: ["watchlist-a", "watchlist-b"],
+        includeOpportunityCatalog: true,
+        prepareTopMatches: false,
       }),
     });
     const runBody = await runRes.json();
@@ -948,6 +950,8 @@ describe.sequential("Pipeline API routes", () => {
     expect(runPipeline).toHaveBeenCalledWith(
       expect.objectContaining({
         watchlistSelectedSourceIds: ["watchlist-a", "watchlist-b"],
+        includeOpportunityCatalog: true,
+        prepareTopMatches: false,
       }),
       expect.objectContaining({
         hostedUsageReservationId: null,

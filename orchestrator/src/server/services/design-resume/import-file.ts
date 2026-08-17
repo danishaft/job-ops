@@ -10,7 +10,7 @@ import { getRequestId } from "@server/infra/request-context";
 import {
   DocxTextExtractionError,
   extractDocxText,
-  extractPdfText,
+  extractPdfDocument,
   PdfTextExtractionError,
 } from "@server/services/document-text-extraction";
 import { ClaudeCliClient } from "@server/services/llm/claude-cli/client";
@@ -810,7 +810,10 @@ async function extractResumeDocxText(decoded: Buffer): Promise<string> {
 
 async function extractResumePdfText(decoded: Buffer): Promise<string> {
   try {
-    return await extractPdfText(decoded);
+    const { text, links } = await extractPdfDocument(decoded);
+    if (links.length === 0) return text;
+
+    return `${text}\n\nEmbedded links extracted from PDF annotations:\n${JSON.stringify(links, null, 2)}`;
   } catch (error) {
     if (error instanceof PdfTextExtractionError) {
       if (error.code === "EMPTY_TEXT") {
@@ -860,6 +863,7 @@ ${documentText}
 
 Extract the resume into the provided structured output schema.
 Use empty strings, empty arrays, or empty objects for missing values.
+When embedded PDF links are provided, assign them only where their domain or path clearly matches a visible profile, company, or project. Preserve the exact URL and do not invent associations.
 For rich text descriptions and summaries, use simple HTML tags only: <p>, <ul>, <li>, <strong>, <em>.
 Return normal JSON matching the schema, not JSON serialized inside a string.
 `.trim();

@@ -7,14 +7,17 @@
 
 export * from "./types/api";
 export * from "./types/app";
+export * from "./types/browser-actions";
 export * from "./types/chat";
 export * from "./types/design-resume";
 export * from "./types/design-resume-jake";
 export * from "./types/extractors";
 export * from "./types/jobs";
 export * from "./types/location";
+export * from "./types/outreach";
 export * from "./types/pipeline";
 export * from "./types/post-application";
 export * from "./types/settings";
+export * from "./types/tailoring-grounding";
 export * from "./types/usage";
 export * from "./types/visa-sponsors";

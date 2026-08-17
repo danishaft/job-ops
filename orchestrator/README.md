@@ -95,6 +95,8 @@ orchestrator/
 | GET | `/api/post-application/runs` | List sync run history |
 | GET | `/api/post-application/providers/gmail/oauth/start` | Initiate Gmail OAuth flow |
 | POST | `/api/post-application/providers/gmail/oauth/exchange` | Exchange OAuth code |
+| GET | `/api/post-application/providers/outlook/oauth/start` | Initiate Outlook OAuth flow |
+| POST | `/api/post-application/providers/outlook/oauth/exchange` | Exchange Outlook OAuth code |
 
 ## Daily Flow
 
@@ -113,7 +115,7 @@ orchestrator/
    - Click "Mark Applied" to mark application status
 
 3. **Track responses (optional):**
-   - Connect Gmail in Tracking Inbox settings
+   - Connect Outlook or Gmail in Tracking Inbox settings
    - Automatic email monitoring for interview invites, offers, rejections
    - Review and approve/ignore matched emails in the Inbox
 

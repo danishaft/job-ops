@@ -1,3 +1,4 @@
+import { OPPORTUNITY_SOURCES } from "@shared/opportunity-sources.js";
 import type { JobSource, WatchlistSelectedSource } from "@shared/types";
 import {
   AnimatePresence,
@@ -76,7 +77,9 @@ export function AutomaticSourcePickerCard({
     (row) => row.status.available,
   ).length;
   const selectedCount =
-    selectedSourceRows.length + selectedWatchlistSourceIds.length;
+    selectedSourceRows.length +
+    selectedWatchlistSourceIds.length +
+    OPPORTUNITY_SOURCES.length;
 
   return (
     <Card>
@@ -125,7 +128,10 @@ export function AutomaticSourcePickerCard({
                     {selectedCount} selected
                   </Badge>
                   <Badge variant="outline" className="rounded-full">
-                    {availableCount + watchlistSources.length} available
+                    {availableCount +
+                      watchlistSources.length +
+                      OPPORTUNITY_SOURCES.length}{" "}
+                    available
                   </Badge>
                   {unavailableSourceRows.length > 0 ? (
                     <Badge variant="outline" className="rounded-full">
@@ -168,6 +174,21 @@ export function AutomaticSourcePickerCard({
                   rowAnimate={sourceSectionAnimate}
                   rowExit={sourceRowExit}
                 />
+                <motion.div layout transition={sourceMotionTransition}>
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                      High-signal startup catalog
+                    </p>
+                    <Badge variant="outline" className="rounded-full">
+                      {OPPORTUNITY_SOURCES.length} included
+                    </Badge>
+                  </div>
+                  <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                    VC portfolio boards, talent networks, Hacker News, funding
+                    signals, and open-source opportunities are batch-checked.
+                    Sources that block normal fetching use Peruz when available.
+                  </p>
+                </motion.div>
                 <WatchlistSourceGroup
                   sources={watchlistSources}
                   selectedSourceIds={selectedWatchlistSourceIds}

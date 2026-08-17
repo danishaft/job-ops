@@ -12,6 +12,7 @@ import type {
   JobsListResponse,
   JobsRevisionResponse,
   JobTracerLinksResponse,
+  LatestTailoringAuditResponse,
   PostApplicationJobEmailsResponse,
   StageEvent,
   StageEventMetadata,
@@ -85,6 +86,14 @@ export async function getJobsRevision(options?: {
 
 export async function getJob(id: string): Promise<Job> {
   return fetchApi<Job>(withQuery(`/jobs/${id}`, { t: Date.now() }));
+}
+
+export async function getLatestTailoringAudit(
+  id: string,
+): Promise<LatestTailoringAuditResponse> {
+  return fetchApi<LatestTailoringAuditResponse>(
+    withQuery(`/jobs/${id}/tailoring-audit/latest`, { t: Date.now() }),
+  );
 }
 
 export async function updateJob(

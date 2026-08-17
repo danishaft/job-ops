@@ -15,8 +15,8 @@ import {
 } from "./country-map.js";
 import { createDefaultSearchState } from "./default-search-state.js";
 
-const BASE_URL = "https://hiring.cafe/";
-const JOB_DETAIL_BASE_URL = "https://hiring.cafe/job/";
+const BASE_URL = "https://hiringcafe.com/";
+const JOB_DETAIL_BASE_URL = "https://hiringcafe.com/job/";
 const DEFAULT_MAX_JOBS_PER_TERM = 200;
 const DEFAULT_SEARCH_TERM = "web developer";
 const DEFAULT_DATE_FETCHED_PAST_N_DAYS = 30;

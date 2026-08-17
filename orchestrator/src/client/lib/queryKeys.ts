@@ -56,6 +56,8 @@ export const queryKeys = {
     notes: (id: string) => [...queryKeys.jobs.all, "notes", id] as const,
     documents: (id: string) =>
       [...queryKeys.jobs.all, "documents", id] as const,
+    tailoringAudit: (id: string) =>
+      [...queryKeys.jobs.all, "tailoring-audit", id] as const,
     emails: (id: string, limit: number) =>
       [...queryKeys.jobs.all, "emails", id, { limit }] as const,
   },

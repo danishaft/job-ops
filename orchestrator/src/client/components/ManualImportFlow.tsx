@@ -1,6 +1,21 @@
 import * as api from "@client/api";
 import { useSettings } from "@client/hooks/useSettings";
-import type { ManualJobDraft } from "@shared/types.js";
+import {
+  DEFAULT_OPPORTUNITY_SIGNALS,
+  getOpportunityRoutePlan,
+  normalizeOpportunitySignals,
+  resolveOpportunityRoute,
+} from "@shared/opportunity-routing.js";
+import {
+  OPPORTUNITY_SOURCES,
+  type OpportunitySourceDefinition,
+} from "@shared/opportunity-sources.js";
+import type {
+  ManualJobDraft,
+  OpportunityEligibility,
+  OpportunitySignals,
+  OpportunityWarmConnectionStatus,
+} from "@shared/types.js";
 import {
   ArrowDown,
   ArrowLeft,
@@ -10,6 +25,7 @@ import {
   CheckCircle2,
   CircleAlert,
   DollarSign,
+  ExternalLink,
   FileText,
   GraduationCap,
   Link,
@@ -17,6 +33,7 @@ import {
   ListChecks,
   Loader2,
   MapPin,
+  PanelsTopLeft,
   Sparkles,
   Tag,
   Users,
@@ -62,9 +79,10 @@ type ManualJobDraftState = {
   disciplines: string;
   degreeRequired: string;
   starting: string;
+  opportunitySignals: OpportunitySignals;
 };
 
-type DraftFieldKey = keyof ManualJobDraftState;
+type DraftFieldKey = Exclude<keyof ManualJobDraftState, "opportunitySignals">;
 
 type ReviewFieldConfig = {
   id: string;
@@ -93,6 +111,7 @@ const emptyDraft: ManualJobDraftState = {
   disciplines: "",
   degreeRequired: "",
   starting: "",
+  opportunitySignals: DEFAULT_OPPORTUNITY_SIGNALS,
 };
 
 const STEP_INDEX_BY_ID: Record<ManualImportProgressStep, number> = {
@@ -142,6 +161,13 @@ const REQUIRED_REVIEW_FIELDS: ReviewFieldConfig[] = [
 ];
 
 const OTHER_REVIEW_FIELDS: ReviewFieldConfig[] = [
+  {
+    id: "draft-source",
+    key: "source",
+    label: "Source ID",
+    placeholder: "e.g. a16z:portfolio-jobs",
+    icon: Link2,
+  },
   {
     id: "draft-location",
     key: "location",
@@ -251,6 +277,7 @@ const normalizeDraft = (
   disciplines: draft?.disciplines ?? "",
   degreeRequired: draft?.degreeRequired ?? "",
   starting: draft?.starting ?? "",
+  opportunitySignals: normalizeOpportunitySignals(draft?.opportunitySignals),
 });
 
 const toPayload = (draft: ManualJobDraftState): ManualJobDraft => {
@@ -276,6 +303,7 @@ const toPayload = (draft: ManualJobDraftState): ManualJobDraft => {
     disciplines: clean(draft.disciplines),
     degreeRequired: clean(draft.degreeRequired),
     starting: clean(draft.starting),
+    opportunitySignals: draft.opportunitySignals,
   };
 };
 
@@ -319,6 +347,7 @@ export const ManualImportFlow: React.FC<ManualImportFlowProps> = ({
   const [rawDescription, setRawDescription] = useState("");
   const [fetchUrl, setFetchUrl] = useState("");
   const [isFetching, setIsFetching] = useState(false);
+  const [isPeruzFetching, setIsPeruzFetching] = useState(false);
   const [draft, setDraft] = useState<ManualJobDraftState>(emptyDraft);
   const [warning, setWarning] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -341,6 +370,7 @@ export const ManualImportFlow: React.FC<ManualImportFlowProps> = ({
       setRawDescription(normalized.jobDescription);
       setFetchUrl(normalized.jobUrl);
       setIsFetching(false);
+      setIsPeruzFetching(false);
       setDraft(normalized);
       setWarning(null);
       setError(null);
@@ -364,6 +394,7 @@ export const ManualImportFlow: React.FC<ManualImportFlowProps> = ({
     setRawDescription("");
     setFetchUrl("");
     setIsFetching(false);
+    setIsPeruzFetching(false);
     setDraft(emptyDraft);
     setWarning(null);
     setError(null);
@@ -387,9 +418,17 @@ export const ManualImportFlow: React.FC<ManualImportFlowProps> = ({
   const stepLabel = STEP_LABEL_BY_ID[progressStep];
 
   const canAnalyze =
-    rawDescription.trim().length > 0 && step !== "loading" && !isFetching;
+    rawDescription.trim().length > 0 &&
+    step !== "loading" &&
+    !isFetching &&
+    !isPeruzFetching;
   const canFetch =
-    fetchUrl.trim().length > 0 && !isFetching && step === "paste";
+    fetchUrl.trim().length > 0 &&
+    !isFetching &&
+    !isPeruzFetching &&
+    step === "paste";
+  const route = resolveOpportunityRoute(draft.opportunitySignals);
+  const routePlan = getOpportunityRoutePlan(route);
   const canImport = useMemo(() => {
     if (step !== "review") return false;
     return (
@@ -441,6 +480,37 @@ export const ManualImportFlow: React.FC<ManualImportFlowProps> = ({
     }
   };
 
+  const handlePeruzFetch = async () => {
+    const trimmedUrl = fetchUrl.trim();
+    if (!trimmedUrl) return;
+    try {
+      setError(null);
+      setWarning(null);
+      setFetchNotice(null);
+      setIsPeruzFetching(true);
+      const result = await api.inspectWithPeruz({
+        url: trimmedUrl,
+        kind: "role",
+      });
+      setRawDescription(result.pageText);
+      setFetchedSourceUrl(result.url);
+      setImportSource("peruz_browser");
+      setImportSourceHost(getSourceHost(result.url));
+      setFetchUrl(result.url);
+      setFetchNotice(
+        "Peruz copied the rendered page text. Review it below, then analyze.",
+      );
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Peruz could not inspect this page.",
+      );
+    } finally {
+      setIsPeruzFetching(false);
+    }
+  };
+
   const handleAnalyze = async () => {
     if (!rawDescription.trim()) {
       setError("Paste a job description to continue.");
@@ -475,6 +545,43 @@ export const ManualImportFlow: React.FC<ManualImportFlowProps> = ({
       setError(message);
       setStep("paste");
     }
+  };
+
+  const handleAddWithoutRole = () => {
+    const jobUrl = fetchUrl.trim();
+    setDraft({
+      ...emptyDraft,
+      title: "Potential engineering opportunity",
+      jobUrl,
+      jobDescription:
+        "Company-level opportunity captured for targeted research and follow-up.",
+      opportunitySignals: normalizeOpportunitySignals({ hasOpenRole: false }),
+    });
+    setImportSource("manual");
+    setImportSourceHost(getSourceHost(jobUrl));
+    setTailorAfterImport(false);
+    setError(null);
+    setWarning(null);
+    setStep("review");
+  };
+
+  const handleSourcePreset = (source: OpportunitySourceDefinition) => {
+    setDraft({
+      ...emptyDraft,
+      source: source.sourceId,
+      title: `${source.label} profile`,
+      employer: source.label,
+      jobUrl: source.url,
+      applicationLink: source.url,
+      jobDescription: `Reusable candidate profile for ${source.label}. Monitor portfolio companies as separate opportunities.`,
+      opportunitySignals: normalizeOpportunitySignals(source.defaultSignals),
+    });
+    setImportSource(source.sourceId);
+    setImportSourceHost(getSourceHost(source.url));
+    setTailorAfterImport(false);
+    setError(null);
+    setWarning(null);
+    setStep("review");
   };
 
   const handleImport = async () => {
@@ -530,6 +637,59 @@ export const ManualImportFlow: React.FC<ManualImportFlowProps> = ({
       <div className="mt-4 flex-1 overflow-y-auto pr-1">
         {step === "paste" && (
           <div className="space-y-4">
+            <details className="rounded-lg border border-border/70 bg-card/35 p-3">
+              <summary className="cursor-pointer text-sm font-semibold">
+                High-signal startup sources ({OPPORTUNITY_SOURCES.length})
+              </summary>
+              <p className="mt-2 text-xs text-muted-foreground">
+                Portfolio boards find open roles. Talent networks create one
+                reusable profile opportunity. They are separate channels, not
+                duplicates.
+              </p>
+              <div className="mt-3 max-h-64 space-y-2 overflow-y-auto pr-1">
+                {OPPORTUNITY_SOURCES.map((source) => (
+                  <div
+                    key={source.id}
+                    className="flex items-center justify-between gap-3 rounded-md border border-border/50 px-3 py-2"
+                  >
+                    <div className="min-w-0">
+                      <div className="truncate text-xs font-medium">
+                        {source.label}
+                      </div>
+                      <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                        {source.channel.replaceAll("_", " ")}
+                        {source.browserRequired ? " · Peruz" : ""}
+                      </div>
+                    </div>
+                    <div className="flex shrink-0 gap-1">
+                      <Button
+                        asChild
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 px-2"
+                      >
+                        <a href={source.url} target="_blank" rel="noreferrer">
+                          <ExternalLink className="h-3.5 w-3.5" />
+                          <span className="sr-only">Open {source.label}</span>
+                        </a>
+                      </Button>
+                      {source.trackAsOpportunity && (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="h-7 px-2 text-xs"
+                          onClick={() => handleSourcePreset(source)}
+                        >
+                          Track profile
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </details>
+
             <div className="space-y-2">
               <div className="flex items-center justify-between gap-3">
                 <label
@@ -569,6 +729,20 @@ export const ManualImportFlow: React.FC<ManualImportFlowProps> = ({
                     <Link className="h-4 w-4" />
                   )}
                   {isFetching ? "Fetching..." : "Fetch"}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={!canFetch}
+                  className="gap-2 shrink-0"
+                  onClick={() => void handlePeruzFetch()}
+                >
+                  {isPeruzFetching ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <PanelsTopLeft className="h-4 w-4" />
+                  )}
+                  Peruz
                 </Button>
               </div>
               <p className="text-xs text-muted-foreground">
@@ -629,6 +803,16 @@ export const ManualImportFlow: React.FC<ManualImportFlowProps> = ({
               <Sparkles className="h-4 w-4" />
               Analyze JD
             </Button>
+
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleAddWithoutRole}
+              className="w-full h-10 gap-2"
+            >
+              <Building2 className="h-4 w-4" />
+              Add company, signal, network, or OSS target
+            </Button>
           </div>
         )}
 
@@ -663,6 +847,130 @@ export const ManualImportFlow: React.FC<ManualImportFlowProps> = ({
                 </p>
               </div>
             )}
+
+            <ReviewSection
+              icon={ListChecks}
+              title="Opportunity route"
+              description="Set only verified signals. JobOps chooses one route and keeps every external action for your approval."
+            >
+              <div className="rounded-lg border border-primary/25 bg-primary/5 p-3">
+                <div className="text-sm font-semibold">{routePlan.label}</div>
+                <div className="mt-1 text-xs text-muted-foreground">
+                  Channel: {routePlan.channel}
+                </div>
+                <ol className="mt-3 space-y-1 text-xs text-muted-foreground">
+                  {routePlan.steps.map((routeStep, index) => (
+                    <li key={routeStep.id}>
+                      {index + 1}. {routeStep.label}
+                      {routeStep.externalAction ? " — you submit/send" : ""}
+                    </li>
+                  ))}
+                </ol>
+              </div>
+
+              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                <OpportunitySignalToggle
+                  id="signal-open-role"
+                  label="Open role exists"
+                  checked={draft.opportunitySignals.hasOpenRole}
+                  onChange={(checked) =>
+                    setOpportunitySignal(setDraft, "hasOpenRole", checked)
+                  }
+                />
+                <OpportunitySignalToggle
+                  id="signal-direct-email"
+                  label="Direct application email"
+                  checked={draft.opportunitySignals.hasDirectApplicationEmail}
+                  onChange={(checked) =>
+                    setOpportunitySignal(
+                      setDraft,
+                      "hasDirectApplicationEmail",
+                      checked,
+                    )
+                  }
+                />
+                <OpportunitySignalToggle
+                  id="signal-hiring"
+                  label="Strong hiring signal"
+                  checked={draft.opportunitySignals.hasStrongHiringSignal}
+                  onChange={(checked) =>
+                    setOpportunitySignal(
+                      setDraft,
+                      "hasStrongHiringSignal",
+                      checked,
+                    )
+                  }
+                />
+                <OpportunitySignalToggle
+                  id="signal-talent-network"
+                  label="VC talent network"
+                  checked={draft.opportunitySignals.isTalentNetwork}
+                  onChange={(checked) =>
+                    setOpportunitySignal(setDraft, "isTalentNetwork", checked)
+                  }
+                />
+                <OpportunitySignalToggle
+                  id="signal-open-source"
+                  label="Open-source company"
+                  checked={draft.opportunitySignals.isOpenSourceCompany}
+                  onChange={(checked) =>
+                    setOpportunitySignal(
+                      setDraft,
+                      "isOpenSourceCompany",
+                      checked,
+                    )
+                  }
+                />
+              </div>
+
+              <label
+                htmlFor="signal-warm-connection"
+                className="mt-3 block text-xs font-medium text-muted-foreground"
+              >
+                Warm connection
+              </label>
+              <select
+                id="signal-warm-connection"
+                value={draft.opportunitySignals.warmConnectionStatus}
+                onChange={(event) =>
+                  setWarmConnectionStatus(
+                    setDraft,
+                    event.target.value as OpportunityWarmConnectionStatus,
+                  )
+                }
+                className="mt-1 h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+              >
+                <option value="unknown">
+                  Unknown — check after shortlisting
+                </option>
+                <option value="none">No warm connection</option>
+                <option value="warm">Warm connection exists</option>
+              </select>
+
+              <label
+                htmlFor="signal-eligibility"
+                className="mt-3 block text-xs font-medium text-muted-foreground"
+              >
+                Visa, location, and work eligibility
+              </label>
+              <select
+                id="signal-eligibility"
+                value={draft.opportunitySignals.eligibility}
+                onChange={(event) =>
+                  setOpportunityEligibility(
+                    setDraft,
+                    event.target.value as OpportunityEligibility,
+                  )
+                }
+                className="mt-1 h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+              >
+                <option value="unknown">
+                  Unknown — verify before applying
+                </option>
+                <option value="eligible">Eligible</option>
+                <option value="ineligible">Ineligible — archive</option>
+              </select>
+            </ReviewSection>
 
             <ReviewSection
               icon={CheckCircle2}
@@ -780,6 +1088,63 @@ const ReviewSection: React.FC<{
     </div>
     {children}
   </section>
+);
+
+function setOpportunitySignal(
+  setDraft: React.Dispatch<React.SetStateAction<ManualJobDraftState>>,
+  key: Exclude<
+    keyof OpportunitySignals,
+    "eligibility" | "hasWarmConnection" | "warmConnectionStatus"
+  >,
+  value: boolean,
+) {
+  setDraft((previous) => ({
+    ...previous,
+    opportunitySignals: { ...previous.opportunitySignals, [key]: value },
+  }));
+}
+
+function setWarmConnectionStatus(
+  setDraft: React.Dispatch<React.SetStateAction<ManualJobDraftState>>,
+  status: OpportunityWarmConnectionStatus,
+) {
+  setDraft((previous) => ({
+    ...previous,
+    opportunitySignals: {
+      ...previous.opportunitySignals,
+      warmConnectionStatus: status,
+      hasWarmConnection: status === "warm",
+    },
+  }));
+}
+
+function setOpportunityEligibility(
+  setDraft: React.Dispatch<React.SetStateAction<ManualJobDraftState>>,
+  eligibility: OpportunityEligibility,
+) {
+  setDraft((previous) => ({
+    ...previous,
+    opportunitySignals: { ...previous.opportunitySignals, eligibility },
+  }));
+}
+
+const OpportunitySignalToggle: React.FC<{
+  id: string;
+  label: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}> = ({ id, label, checked, onChange }) => (
+  <label
+    htmlFor={id}
+    className="flex cursor-pointer items-center gap-2 rounded-md border border-border/60 px-3 py-2 text-xs"
+  >
+    <Checkbox
+      id={id}
+      checked={checked}
+      onCheckedChange={(value) => onChange(value === true)}
+    />
+    {label}
+  </label>
 );
 
 const ReviewField: React.FC<{

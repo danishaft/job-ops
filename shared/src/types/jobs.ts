@@ -14,6 +14,64 @@ export type JobStatus =
   | "skipped" // User skipped this job
   | "expired"; // Deadline passed
 
+export const OPPORTUNITY_TYPES = [
+  "open_role",
+  "hiring_signal",
+  "talent_network",
+  "open_source",
+  "watchlist",
+] as const;
+
+export type OpportunityType = (typeof OPPORTUNITY_TYPES)[number];
+
+export const OPPORTUNITY_ROUTES = [
+  "referral_first",
+  "direct_email_application",
+  "apply_then_contact",
+  "speculative_outreach",
+  "submit_talent_profile",
+  "contribute_then_connect",
+  "watch",
+  "archive_ineligible",
+] as const;
+
+export type OpportunityRoute = (typeof OPPORTUNITY_ROUTES)[number];
+
+export const OPPORTUNITY_ELIGIBILITY = [
+  "eligible",
+  "unknown",
+  "ineligible",
+] as const;
+
+export type OpportunityEligibility = (typeof OPPORTUNITY_ELIGIBILITY)[number];
+
+export const OPPORTUNITY_WARM_CONNECTION_STATUSES = [
+  "unknown",
+  "none",
+  "warm",
+] as const;
+
+export type OpportunityWarmConnectionStatus =
+  (typeof OPPORTUNITY_WARM_CONNECTION_STATUSES)[number];
+
+export interface OpportunitySignals {
+  hasOpenRole: boolean;
+  hasWarmConnection: boolean;
+  warmConnectionStatus: OpportunityWarmConnectionStatus;
+  hasDirectApplicationEmail: boolean;
+  hasStrongHiringSignal: boolean;
+  isTalentNetwork: boolean;
+  isOpenSourceCompany: boolean;
+  eligibility: OpportunityEligibility;
+}
+
+export interface OpportunityProvenance {
+  source: string;
+  sourceJobId: string | null;
+  url: string;
+  discoveredAt: string | null;
+}
+
 export const APPLICATION_STAGES = [
   "applied",
   "recruiter_screen",
@@ -179,6 +237,10 @@ export interface Job {
   sourceJobId: string | null; // External ID (if provided)
   jobUrlDirect: string | null; // Source-provided direct URL (if provided)
   datePosted: string | null; // Source-provided posting date (if provided)
+  opportunityType: OpportunityType;
+  opportunityRoute: OpportunityRoute;
+  opportunitySignals: OpportunitySignals;
+  opportunityProvenance: OpportunityProvenance[];
 
   // From crawler (normalized)
   title: string;
@@ -258,6 +320,8 @@ export type JobListItem = Pick<
   | "id"
   | "source"
   | "sourceJobId"
+  | "opportunityType"
+  | "opportunityRoute"
   | "title"
   | "employer"
   | "jobUrl"
@@ -283,7 +347,9 @@ export type JobListItem = Pick<
   | "readyAt"
   | "appliedAt"
   | "updatedAt"
->;
+> & {
+  opportunitySignals?: OpportunitySignals;
+};
 
 export interface CreateJobInput {
   source: JobSource;
@@ -300,6 +366,8 @@ export interface CreateJobInput {
   degreeRequired?: string;
   starting?: string;
   jobDescription?: string;
+  opportunitySignals?: Partial<OpportunitySignals>;
+  opportunityProvenance?: OpportunityProvenance[];
 
   // JobSpy fields (optional)
   sourceJobId?: string;
@@ -338,6 +406,7 @@ export interface ManualJobDraft {
   employer?: string;
   jobUrl?: string;
   applicationLink?: string;
+  opportunitySignals?: Partial<OpportunitySignals>;
   location?: string;
   salary?: string;
   deadline?: string;
@@ -535,6 +604,8 @@ export interface UpdateJobInput {
   employer?: string;
   jobUrl?: string;
   applicationLink?: string | null;
+  opportunitySignals?: OpportunitySignals;
+  opportunityProvenance?: OpportunityProvenance[];
   disciplines?: string | null;
   location?: string | null;
   salary?: string | null;

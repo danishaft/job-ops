@@ -24,6 +24,8 @@ import {
   type Job,
   type JobListItem,
   type JobStatus,
+  OPPORTUNITY_ELIGIBILITY,
+  OPPORTUNITY_WARM_CONNECTION_STATUSES,
 } from "@shared/types";
 import { z } from "zod";
 
@@ -62,6 +64,9 @@ export function toJobListItem(
     id: job.id,
     source: job.source,
     sourceJobId: job.sourceJobId,
+    opportunitySignals: job.opportunitySignals,
+    opportunityType: job.opportunityType,
+    opportunityRoute: job.opportunityRoute,
     title: job.title,
     employer: job.employer,
     jobUrl: job.jobUrl,
@@ -119,6 +124,18 @@ export const updateJobSchema = z.object({
   employer: z.string().trim().min(1).max(500).optional(),
   jobUrl: z.string().trim().min(1).max(2000).url().optional(),
   applicationLink: z.string().trim().max(2000).url().nullable().optional(),
+  opportunitySignals: z
+    .object({
+      hasOpenRole: z.boolean(),
+      hasWarmConnection: z.boolean(),
+      warmConnectionStatus: z.enum(OPPORTUNITY_WARM_CONNECTION_STATUSES),
+      hasDirectApplicationEmail: z.boolean(),
+      hasStrongHiringSignal: z.boolean(),
+      isTalentNetwork: z.boolean(),
+      isOpenSourceCompany: z.boolean(),
+      eligibility: z.enum(OPPORTUNITY_ELIGIBILITY),
+    })
+    .optional(),
   location: z.string().trim().max(200).nullable().optional(),
   salary: z.string().trim().max(200).nullable().optional(),
   deadline: z.string().trim().max(100).nullable().optional(),

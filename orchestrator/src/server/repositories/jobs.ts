@@ -3,7 +3,16 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { isLikelySameOpportunity } from "@shared/job-matching.js";
 import { buildLocationEvidence } from "@shared/location-domain.js";
+import {
+  buildOpportunityProvenance,
+  mergeOpportunityProvenance,
+  mergeOpportunitySignals,
+  normalizeOpportunitySignals,
+  resolveOpportunityRoute,
+  resolveOpportunityType,
+} from "@shared/opportunity-routing.js";
 import type {
   CreateJobInput,
   CreateJobNoteInput,
@@ -15,6 +24,8 @@ import type {
   JobPdfSource,
   JobStatus,
   JobsRevisionResponse,
+  OpportunityProvenance,
+  OpportunitySignals,
   UpdateJobInput,
   UpdateJobNoteInput,
 } from "@shared/types";
@@ -105,6 +116,45 @@ function serializeLocationEvidence(
   return JSON.stringify(buildLocationEvidence(evidence));
 }
 
+function parseOpportunitySignals(
+  raw: string | null | undefined,
+): OpportunitySignals {
+  if (!raw) return normalizeOpportunitySignals();
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return normalizeOpportunitySignals();
+    }
+    return normalizeOpportunitySignals(parsed as Partial<OpportunitySignals>);
+  } catch {
+    return normalizeOpportunitySignals();
+  }
+}
+
+function parseOpportunityProvenance(
+  raw: string | null | undefined,
+): OpportunityProvenance[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((entry): entry is OpportunityProvenance => {
+      if (!entry || typeof entry !== "object") return false;
+      const candidate = entry as Record<string, unknown>;
+      return (
+        typeof candidate.source === "string" &&
+        typeof candidate.url === "string" &&
+        (candidate.sourceJobId === null ||
+          typeof candidate.sourceJobId === "string") &&
+        (candidate.discoveredAt === null ||
+          typeof candidate.discoveredAt === "string")
+      );
+    });
+  } catch {
+    return [];
+  }
+}
+
 /**
  * Get all jobs, optionally filtered by status.
  */
@@ -136,6 +186,9 @@ export async function getJobListItems(
     id: jobs.id,
     source: jobs.source,
     sourceJobId: jobs.sourceJobId,
+    opportunitySignals: jobs.opportunitySignals,
+    opportunityType: jobs.opportunityType,
+    opportunityRoute: jobs.opportunityRoute,
     title: jobs.title,
     employer: jobs.employer,
     jobUrl: jobs.jobUrl,
@@ -189,6 +242,9 @@ export async function getJobListItems(
     return {
       ...row,
       source: row.source as JobListItem["source"],
+      opportunitySignals: parseOpportunitySignals(row.opportunitySignals),
+      opportunityType: row.opportunityType,
+      opportunityRoute: row.opportunityRoute,
       status: row.status as JobStatus,
       pdfSource: row.pdfSource as JobPdfSource | null,
       pdfRegenerating: row.pdfRegenerating ?? false,
@@ -471,6 +527,13 @@ async function insertJob(input: CreateJobInput): Promise<Job> {
   const id = randomUUID();
   const now = new Date().toISOString();
   const scope = getPrivateDataScope();
+  const opportunitySignals = normalizeOpportunitySignals(
+    input.opportunitySignals,
+  );
+  const opportunityProvenance = mergeOpportunityProvenance(
+    input.opportunityProvenance,
+    [buildOpportunityProvenance({ ...input, discoveredAt: now })],
+  );
 
   await db.insert(jobs).values({
     id,
@@ -480,6 +543,10 @@ async function insertJob(input: CreateJobInput): Promise<Job> {
     sourceJobId: input.sourceJobId ?? null,
     jobUrlDirect: input.jobUrlDirect ?? null,
     datePosted: input.datePosted ?? null,
+    opportunityType: resolveOpportunityType(opportunitySignals),
+    opportunityRoute: resolveOpportunityRoute(opportunitySignals),
+    opportunitySignals: JSON.stringify(opportunitySignals),
+    opportunityProvenance: JSON.stringify(opportunityProvenance),
     title: input.title,
     employer: input.employer,
     employerUrl: input.employerUrl ?? null,
@@ -546,6 +613,46 @@ async function tryInsertJob(input: CreateJobInput): Promise<Job | null> {
   }
 }
 
+async function mergeExistingOpportunity(
+  existing: Job,
+  input: CreateJobInput,
+): Promise<Job> {
+  const signals = mergeOpportunitySignals(
+    existing.opportunitySignals,
+    input.opportunitySignals,
+  );
+  const provenance = mergeOpportunityProvenance(
+    existing.opportunityProvenance,
+    [...(input.opportunityProvenance ?? []), buildOpportunityProvenance(input)],
+  );
+  return (
+    (await updateJob(existing.id, {
+      opportunitySignals: signals,
+      opportunityProvenance: provenance,
+    })) ?? existing
+  );
+}
+
+async function findExistingOpportunityByTitleAndEmployer(
+  input: CreateJobInput,
+): Promise<Job | null> {
+  const candidates = await db
+    .select({
+      id: jobs.id,
+      source: jobs.source,
+      title: jobs.title,
+      employer: jobs.employer,
+    })
+    .from(jobs)
+    .where(jobsScopeFilter());
+  const match = candidates.find(
+    (candidate) =>
+      candidate.source !== input.source &&
+      isLikelySameOpportunity(candidate, input),
+  );
+  return match ? getJobById(match.id) : null;
+}
+
 /**
  * Create jobs (or return existing jobs for duplicate URLs).
  */
@@ -559,10 +666,15 @@ export async function createJobs(
   onProgress?: (input: CreateJobInput, index: number, total: number) => void,
 ): Promise<Job | { created: number; skipped: number }> {
   if (!Array.isArray(inputOrInputs)) {
+    const matchingOpportunity =
+      await findExistingOpportunityByTitleAndEmployer(inputOrInputs);
+    if (matchingOpportunity) {
+      return mergeExistingOpportunity(matchingOpportunity, inputOrInputs);
+    }
     const inserted = await tryInsertJob(inputOrInputs);
     if (inserted) return inserted;
     const existing = await getJobByUrl(inputOrInputs.jobUrl);
-    if (existing) return existing;
+    if (existing) return mergeExistingOpportunity(existing, inputOrInputs);
     throw new Error("Failed to create or resolve existing job by URL");
   }
 
@@ -593,9 +705,15 @@ export async function createJobs(
   }
 
   const existingRows = await db
-    .select({ jobUrl: jobs.jobUrl })
+    .select({
+      id: jobs.id,
+      jobUrl: jobs.jobUrl,
+      source: jobs.source,
+      title: jobs.title,
+      employer: jobs.employer,
+    })
     .from(jobs)
-    .where(and(jobsScopeFilter(), inArray(jobs.jobUrl, uniqueUrls)));
+    .where(jobsScopeFilter());
   const existingUrlSet = new Set(existingRows.map((row) => row.jobUrl));
 
   for (const { input, count } of byUrl.values()) {
@@ -603,6 +721,23 @@ export async function createJobs(
     onProgress?.(input, processed, byUrl.size);
 
     if (existingUrlSet.has(input.jobUrl)) {
+      const row = existingRows.find(
+        (candidate) => candidate.jobUrl === input.jobUrl,
+      );
+      const existing = row ? await getJobById(row.id) : null;
+      if (existing) await mergeExistingOpportunity(existing, input);
+      skipped += count;
+      continue;
+    }
+
+    const fuzzyMatch = existingRows.find(
+      (candidate) =>
+        candidate.source !== input.source &&
+        isLikelySameOpportunity(candidate, input),
+    );
+    if (fuzzyMatch) {
+      const existing = await getJobById(fuzzyMatch.id);
+      if (existing) await mergeExistingOpportunity(existing, input);
       skipped += count;
       continue;
     }
@@ -641,7 +776,12 @@ export async function updateJob(
       throw new Error("UNIQUE constraint failed: jobs.job_url");
     }
   }
-  const { locationEvidence, ...updateFields } = input;
+  const {
+    locationEvidence,
+    opportunitySignals,
+    opportunityProvenance,
+    ...updateFields
+  } = input;
   const clearsBriefForDescriptionEdit =
     input.jobDescription !== undefined && input.jobBrief === undefined;
   const readyAtUpdate =
@@ -664,6 +804,16 @@ export async function updateJob(
       ...(clearsBriefForDescriptionEdit ? { jobBrief: null } : {}),
       ...(locationEvidence !== undefined
         ? { locationEvidence: serializeLocationEvidence(locationEvidence) }
+        : {}),
+      ...(opportunitySignals !== undefined
+        ? {
+            opportunitySignals: JSON.stringify(opportunitySignals),
+            opportunityType: resolveOpportunityType(opportunitySignals),
+            opportunityRoute: resolveOpportunityRoute(opportunitySignals),
+          }
+        : {}),
+      ...(opportunityProvenance !== undefined
+        ? { opportunityProvenance: JSON.stringify(opportunityProvenance) }
         : {}),
       updatedAt: now,
       ...(input.status === "processing" ? { processedAt: now } : {}),
@@ -846,6 +996,12 @@ function mapRowToJob(row: typeof jobs.$inferSelect): Job {
     sourceJobId: row.sourceJobId ?? null,
     jobUrlDirect: row.jobUrlDirect ?? null,
     datePosted: row.datePosted ?? null,
+    opportunityType: row.opportunityType,
+    opportunityRoute: row.opportunityRoute,
+    opportunitySignals: parseOpportunitySignals(row.opportunitySignals),
+    opportunityProvenance: parseOpportunityProvenance(
+      row.opportunityProvenance,
+    ),
     title: row.title,
     employer: row.employer,
     employerUrl: row.employerUrl,

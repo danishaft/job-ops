@@ -44,11 +44,11 @@ export const ManualImportSheet: React.FC<ManualImportSheetProps> = ({
               <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-border/60 bg-muted/30">
                 <FileText className="h-4 w-4 text-muted-foreground" />
               </span>
-              Manual Import
+              Opportunity Intake
             </SheetTitle>
             <SheetDescription>
-              Paste a job description, review the AI draft, then import the
-              role.
+              Add an open role, hiring signal, VC network, open-source target,
+              or watchlist company. JobOps routes it into one clear playbook.
             </SheetDescription>
           </SheetHeader>
 

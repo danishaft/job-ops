@@ -21,6 +21,14 @@ vi.mock("@server/watchlist/results", () => ({
   listHydratedWatchlistSelectedSources: vi.fn().mockResolvedValue([]),
 }));
 
+vi.mock("@server/services/opportunity-catalog-discovery", () => ({
+  discoverOpportunityCatalogJobs: vi.fn().mockResolvedValue({
+    jobs: [],
+    sourceErrors: [],
+    sourcesChecked: 0,
+  }),
+}));
+
 vi.mock("./watchlist-jobs", () => ({
   discoverWatchlistJobsForPipeline: vi.fn().mockResolvedValue({
     discoveredJobs: [],
@@ -46,6 +54,51 @@ describe("discoverJobsStep", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resetProgress();
+  });
+
+  it("adds the high-signal catalog to the same batch discovery run", async () => {
+    const settingsRepo = await import("@server/repositories/settings");
+    const registryModule = await import("@server/extractors/registry");
+    const catalog = await import(
+      "@server/services/opportunity-catalog-discovery"
+    );
+    vi.mocked(settingsRepo.getAllSettings).mockResolvedValue({
+      searchTerms: JSON.stringify(["backend"]),
+    } as any);
+    vi.mocked(registryModule.getExtractorRegistry).mockResolvedValue({
+      manifests: new Map(),
+      manifestBySource: new Map(),
+      availableSources: [],
+    } as any);
+    vi.mocked(catalog.discoverOpportunityCatalogJobs).mockResolvedValueOnce({
+      jobs: [
+        {
+          source: "a16z:talentplace",
+          sourceJobId: "a16z-talentplace",
+          title: "a16z TalentPlace profile",
+          employer: "a16z TalentPlace",
+          jobUrl: "https://talentplace.a16z.com/",
+        },
+      ],
+      sourceErrors: ["One catalog source: unavailable"],
+      sourcesChecked: 13,
+    });
+
+    const result = await discoverJobsStep({
+      mergedConfig: {
+        ...baseConfig,
+        sources: [],
+        includeOpportunityCatalog: true,
+      },
+      includeWatchlist: false,
+    });
+
+    expect(result.discoveredJobs).toHaveLength(1);
+    expect(result.sourceErrors).toEqual(["One catalog source: unavailable"]);
+    expect(catalog.discoverOpportunityCatalogJobs).toHaveBeenCalledWith({
+      searchTerms: ["backend"],
+      shouldCancel: undefined,
+    });
   });
 
   it("aggregates source errors for enabled sources", async () => {

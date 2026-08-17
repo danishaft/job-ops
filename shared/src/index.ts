@@ -7,5 +7,7 @@ export * from "./ghostwriter-note-context";
 export * from "./job-document-classification";
 export * from "./language-detection";
 export * from "./location-support";
+export * from "./opportunity-routing";
+export * from "./opportunity-sources";
 export * from "./types";
 export * from "./utils/type-conversion";

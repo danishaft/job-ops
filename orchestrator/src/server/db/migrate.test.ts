@@ -76,7 +76,7 @@ describe.sequential("database migrations", () => {
         return fks.some((fk) => fk.from === "tenant_id" && fk.table === "tenants" && String(fk.on_delete).toUpperCase() === "CASCADE");
       }
 
-      const requiredTables = ["jobs", "pipeline_runs", "settings"];
+      const requiredTables = ["jobs", "pipeline_runs", "settings", "tailoring_audit_runs"];
       for (const tableName of requiredTables) {
         if (!hasTenantCascade(tableName)) {
           throw new Error(\`\${tableName} is missing tenant_id -> tenants(id) ON DELETE CASCADE\`);
@@ -196,6 +196,48 @@ describe.sequential("database migrations", () => {
           ...process.env,
           DATA_DIR: tempDir,
         },
+        stdio: "pipe",
+      },
+    );
+  });
+
+  it("creates tenant-scoped people and outreach tables with job ownership", async () => {
+    tempDir = await mkdtemp(join(tmpdir(), "job-ops-migrate-"));
+    const script = `
+      import { join } from "node:path";
+      import { pathToFileURL } from "node:url";
+      import Database from "better-sqlite3";
+
+      const dbPath = join(process.env.DATA_DIR, "jobs.db");
+      await import(pathToFileURL(join(process.cwd(), "src/server/db/migrate.ts")).href);
+      const migratedDb = new Database(dbPath, { readonly: true });
+
+      for (const tableName of ["job_contacts", "job_outreach"]) {
+        const table = migratedDb
+          .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?")
+          .get(tableName);
+        if (!table) throw new Error(\`\${tableName} was not created\`);
+
+        const fks = migratedDb.prepare(\`PRAGMA foreign_key_list(\${tableName})\`).all();
+        const hasJobCascade = fks.some(
+          (fk) => fk.from === "job_id" && fk.table === "jobs" && String(fk.on_delete).toUpperCase() === "CASCADE",
+        );
+        const hasTenantCascade = fks.some(
+          (fk) => fk.from === "tenant_id" && fk.table === "tenants" && String(fk.on_delete).toUpperCase() === "CASCADE",
+        );
+        if (!hasJobCascade || !hasTenantCascade) {
+          throw new Error(\`\${tableName} is missing ownership foreign keys\`);
+        }
+      }
+
+      migratedDb.close();
+    `;
+
+    execFileSync(
+      process.execPath,
+      ["--import", "tsx", "--input-type=module", "-e", script],
+      {
+        env: { ...process.env, DATA_DIR: tempDir },
         stdio: "pipe",
       },
     );
@@ -358,6 +400,44 @@ describe.sequential("database migrations", () => {
 
       if (!duplicateFailed) {
         throw new Error("jobs unique index allowed duplicate NULL user_id rows");
+      }
+
+      const insertContact = migratedDb.prepare(
+        "INSERT INTO job_contacts(id, tenant_id, user_id, job_id, name, title, company, role, relevance_reason, evidence_summary, source_url) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?)",
+      );
+      insertContact.run(
+        "contact-null-owner-1",
+        "tenant_default",
+        "job-null-owner-1",
+        "Ada Lovelace",
+        "Head of Engineering",
+        "Acme",
+        "engineering_leader",
+        "Owns engineering",
+        "Company team page",
+        "https://example.com/team/ada",
+      );
+
+      let duplicateContactFailed = false;
+      try {
+        insertContact.run(
+          "contact-null-owner-2",
+          "tenant_default",
+          "job-null-owner-1",
+          "Ada Lovelace",
+          "Head of Engineering",
+          "Acme",
+          "engineering_leader",
+          "Owns engineering",
+          "Company team page",
+          "https://example.com/team/ada",
+        );
+      } catch {
+        duplicateContactFailed = true;
+      }
+
+      if (!duplicateContactFailed) {
+        throw new Error("job contact unique index allowed duplicate NULL user_id rows");
       }
 
       migratedDb.close();

@@ -82,6 +82,7 @@ vi.mock("../api", () => ({
   getSettings: vi.fn(),
   getJobEmails: vi.fn(),
   getJobDocuments: vi.fn(),
+  getLatestTailoringAudit: vi.fn(),
   createJobNote: vi.fn(),
   updateJobNote: vi.fn(),
   deleteJobNote: vi.fn(),
@@ -201,6 +202,10 @@ beforeEach(() => {
   vi.mocked(api.getProfile).mockResolvedValue({});
   vi.mocked(api.getSettings).mockResolvedValue(createAppSettings());
   vi.mocked(api.getJobDocuments).mockResolvedValue([]);
+  vi.mocked(api.getLatestTailoringAudit).mockResolvedValue({
+    run: null,
+    isCurrent: false,
+  });
   vi.mocked(api.getJobStageEvents).mockResolvedValue([]);
   vi.mocked(api.getJobTasks).mockResolvedValue([
     {

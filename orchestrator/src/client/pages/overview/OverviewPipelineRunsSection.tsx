@@ -276,6 +276,19 @@ function RunInsightsBody(props: {
                     savedDetails.requestedConfig.enableAutoTailoring,
                   )}
                 />
+                <MetricCard
+                  label="High-signal catalog"
+                  value={formatToggleState(
+                    savedDetails.requestedConfig.includeOpportunityCatalog ??
+                      false,
+                  )}
+                />
+                <MetricCard
+                  label="Prepare top matches"
+                  value={formatToggleState(
+                    savedDetails.requestedConfig.prepareTopMatches ?? true,
+                  )}
+                />
               </div>
             </div>
 

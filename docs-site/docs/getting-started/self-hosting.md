@@ -222,6 +222,39 @@ For a full step-by-step setup, exact scope requirements, and troubleshooting, se
 
 - [Gmail OAuth Setup](/docs/next/getting-started/gmail-oauth-setup)
 
+## Outlook Web with Peruz (Tracking Inbox)
+
+The default Outlook integration reads the signed-in Outlook Web inbox through
+your local Peruz browser bridge. It doesn't require Azure, Microsoft Entra, an
+OAuth client ID, or an LLM API.
+
+### 1) Prepare the browser
+
+Install Peruz and verify that `peruz tab.list` can reach your local Chromium
+browser. Open this URL in that browser and sign in yourself:
+
+- `https://outlook.live.com/mail/0/inbox`
+
+JobOps never asks for or stores your Microsoft password.
+
+### 2) Connect Outlook
+
+Open **Tracking Inbox**, select **Outlook Web (Peruz)**, and click **Connect**.
+Keep the Outlook Mail tab open whenever you run **Sync**.
+
+JobOps stores sender, subject, received time, body preview, conversation ID,
+and routing results in the local JobOps database. The Peruz sync doesn't store
+cookies, session headers, or full message bodies, and it doesn't use LLM
+tokens.
+
+## Optional Microsoft Graph connection
+
+The Microsoft Graph OAuth implementation remains available for deployments
+that already own a Microsoft Entra app registration. It uses delegated
+`Mail.Read` and `User.Read`, authorization code flow with PKCE, and no client
+secret. Set `OUTLOOK_OAUTH_CLIENT_ID`, `OUTLOOK_OAUTH_TENANT`, and
+`OUTLOOK_OAUTH_REDIRECT_URI` to use that API directly.
+
 ## Email-to-job matching overview
 
 ```mermaid

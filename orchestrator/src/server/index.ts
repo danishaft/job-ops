@@ -58,16 +58,18 @@ async function startServer() {
   }
 
   const app = createApp();
-  const PORT = process.env.PORT || 3001;
+  const configuredPort = Number.parseInt(process.env.PORT ?? "", 10);
+  const PORT = Number.isInteger(configuredPort) ? configuredPort : 3001;
+  const bindHost = process.env.JOBOPS_BIND_HOST?.trim() || "0.0.0.0";
 
   // Start server
-  const server = app.listen(PORT, async () => {
+  const server = app.listen(PORT, bindHost, async () => {
     console.log(`
 ╔═══════════════════════════════════════════════════════════╗
 ║                                                           ║
 ║   🚀 Job Ops Orchestrator                                 ║
 ║                                                           ║
-║   Server running at: http://localhost:${PORT}               ║
+║   Server running at: http://${bindHost}:${PORT}               ║
 ║                                                           ║
 ║   API:     http://localhost:${PORT}/api                     ║
 ║   Health:  http://localhost:${PORT}/health                  ║

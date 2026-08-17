@@ -2,6 +2,7 @@ import { badRequest, notFound } from "@infra/errors";
 import { fail, ok } from "@infra/http";
 import { logger } from "@infra/logger";
 import * as jobsRepo from "@server/repositories/jobs";
+import * as tailoringAuditRepo from "@server/repositories/tailoring-audit-runs";
 import { attachAppliedDuplicateMatches } from "@server/services/applied-duplicate-matching";
 import { getPdfPath, pdfExists } from "@server/services/pdf";
 import {
@@ -13,6 +14,7 @@ import {
   listJobPostApplicationEmails,
   MAX_JOB_EMAIL_LIMIT,
 } from "@server/services/post-application/job-emails";
+import { createStoredTailoredContentFingerprint } from "@server/services/tailoring-grounding";
 import { type Request, type Response, Router } from "express";
 import { z } from "zod";
 import {
@@ -169,6 +171,40 @@ jobsReadRouter.get("/revision", async (req: Request, res: Response) => {
     fail(res, toJobsRouteError(error));
   }
 });
+
+jobsReadRouter.get(
+  "/:id/tailoring-audit/latest",
+  async (req: Request, res: Response) => {
+    const route = "GET /api/jobs/:id/tailoring-audit/latest";
+    const jobId = req.params.id;
+    try {
+      const job = await requireJob(jobId);
+      const run =
+        await tailoringAuditRepo.getLatestTailoringAuditRunForJob(jobId);
+      const currentFingerprint = createStoredTailoredContentFingerprint({
+        headline: job.tailoredHeadline,
+        summary: job.tailoredSummary,
+        skillsJson: job.tailoredSkills,
+      });
+      const isCurrent = Boolean(
+        run?.outputFingerprint &&
+          currentFingerprint &&
+          run.outputFingerprint === currentFingerprint,
+      );
+
+      logger.info("Latest tailoring audit fetched", {
+        route,
+        jobId,
+        hasRun: Boolean(run),
+        isCurrent,
+        validationIssueCount: run?.validation?.issues.length ?? 0,
+      });
+      ok(res, { run, isCurrent });
+    } catch (error) {
+      fail(res, toJobsRouteError(error));
+    }
+  },
+);
 
 jobsReadRouter.get("/:id", async (req: Request, res: Response) => {
   try {

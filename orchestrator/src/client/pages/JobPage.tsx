@@ -85,7 +85,10 @@ import {
   JobPageLeftSidebar,
 } from "./job-page/JobPageLeftSidebar";
 import { JobPageRightSidebar } from "./job-page/JobPageRightSidebar";
+import { OpportunityPlanCard } from "./job-page/OpportunityPlanCard";
 import { OverviewGhostwriterComposer } from "./job-page/OverviewGhostwriterComposer";
+import { PeopleOutreachCard } from "./job-page/PeopleOutreachCard";
+import { TailoringGroundingCard } from "./job-page/TailoringGroundingCard";
 
 const normalizeMemoryView = (view: string | undefined): JobMemoryView => {
   if (view === "notes" || view === "note") return "note";
@@ -575,6 +578,17 @@ export const JobPage: React.FC = () => {
           <div className="space-y-4">
             {activeMemoryView === "overview" && (
               <section className="space-y-4">
+                <OpportunityPlanCard
+                  job={job}
+                  onUpdated={async () => {
+                    await Promise.all([
+                      jobQuery.refetch(),
+                      notesQuery.refetch(),
+                    ]);
+                  }}
+                />
+                <PeopleOutreachCard job={job} />
+                <TailoringGroundingCard job={job} />
                 <OverviewGhostwriterComposer
                   job={job}
                   baseJobPath={baseJobPath}

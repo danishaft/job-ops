@@ -10,6 +10,8 @@ const createJob = (overrides: Partial<JobListItem> = {}): JobListItem => ({
   id: "job-1",
   source: "indeed",
   sourceJobId: null,
+  opportunityType: "open_role",
+  opportunityRoute: "apply_then_contact",
   title: "Backend Engineer",
   employer: "Acme",
   jobUrl: "https://example.com/jobs/job-1",

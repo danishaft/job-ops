@@ -3,6 +3,11 @@ import JSZip from "jszip";
 export type DocxTextExtractionErrorCode = "INVALID_DOCX" | "MISSING_DOCUMENT";
 export type PdfTextExtractionErrorCode = "INVALID_PDF" | "EMPTY_TEXT";
 
+export interface ExtractedPdfDocument {
+  text: string;
+  links: string[];
+}
+
 export class DocxTextExtractionError extends Error {
   code: DocxTextExtractionErrorCode;
 
@@ -110,4 +115,65 @@ export async function extractPdfText(buffer: Buffer): Promise<string> {
       "PDF file could not be read or is encrypted.",
     );
   }
+}
+
+function normalizePdfLink(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const link = value.trim();
+  if (!link || link.length > 2_000) return null;
+
+  try {
+    const parsed = new URL(link);
+    return ["http:", "https:", "mailto:"].includes(parsed.protocol)
+      ? link
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Extract link annotation targets without making the PDF unreadable when an
+ * otherwise valid document contains malformed or unsupported annotations.
+ */
+export async function extractPdfLinks(buffer: Buffer): Promise<string[]> {
+  let document: { destroy(): Promise<void>; numPages: number } | null = null;
+  try {
+    const { getDocument } = await import("pdfjs-dist/legacy/build/pdf.mjs");
+    const loadingTask = getDocument({
+      data: new Uint8Array(buffer),
+      disableWorker: true,
+    });
+    const pdf = await loadingTask.promise;
+    document = pdf;
+    const links = new Set<string>();
+
+    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+      const page = await pdf.getPage(pageNumber);
+      const annotations = await page.getAnnotations({ intent: "display" });
+      for (const annotation of annotations) {
+        if (annotation.subtype !== "Link") continue;
+        const link =
+          normalizePdfLink(annotation.url) ??
+          normalizePdfLink(annotation.unsafeUrl);
+        if (link) links.add(link);
+      }
+    }
+
+    return [...links];
+  } catch {
+    return [];
+  } finally {
+    await document?.destroy().catch(() => undefined);
+  }
+}
+
+export async function extractPdfDocument(
+  buffer: Buffer,
+): Promise<ExtractedPdfDocument> {
+  const [text, links] = await Promise.all([
+    extractPdfText(buffer),
+    extractPdfLinks(buffer),
+  ]);
+  return { text, links };
 }

@@ -116,6 +116,82 @@ describe.sequential("Manual jobs API routes", () => {
     expect(readyBody.data.suitabilityScore).toBe(88);
   });
 
+  it("routes a VC talent profile without treating it as an open role", async () => {
+    const res = await fetch(`${baseUrl}/api/manual-jobs/import`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        skipTailoring: true,
+        job: {
+          source: "a16z:talentplace",
+          title: "a16z TalentPlace profile",
+          employer: "a16z portfolio",
+          jobUrl: "https://talentplace.a16z.com/",
+          applicationLink: "https://talentplace.a16z.com/",
+          jobDescription: "Reusable candidate profile for portfolio companies.",
+          opportunitySignals: {
+            hasOpenRole: false,
+            isTalentNetwork: true,
+            eligibility: "eligible",
+          },
+        },
+      }),
+    });
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.data.opportunityType).toBe("talent_network");
+    expect(body.data.opportunityRoute).toBe("submit_talent_profile");
+    expect(body.data.opportunitySignals.hasOpenRole).toBe(false);
+  });
+
+  it("merges the same cross-source role and preserves both provenance entries", async () => {
+    const firstPayload = {
+      skipTailoring: true,
+      job: {
+        source: "a16z:portfolio-jobs",
+        sourceJobId: "acme-123",
+        title: "Backend Engineer",
+        employer: "Acme Labs",
+        jobUrl: "https://portfoliojobs.a16z.com/jobs/acme-123",
+        jobDescription: "Build backend systems.",
+      },
+    };
+    const secondPayload = {
+      skipTailoring: true,
+      job: {
+        source: "linkedin",
+        sourceJobId: "linkedin-456",
+        title: "Backend Engineer",
+        employer: "Acme Labs, Inc.",
+        jobUrl: "https://www.linkedin.com/jobs/view/456",
+        jobDescription: "Build backend systems.",
+      },
+    };
+
+    const first = await fetch(`${baseUrl}/api/manual-jobs/import`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(firstPayload),
+    });
+    const firstBody = await first.json();
+    const second = await fetch(`${baseUrl}/api/manual-jobs/import`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(secondPayload),
+    });
+    const secondBody = await second.json();
+
+    expect(second.status).toBe(200);
+    expect(secondBody.data.id).toBe(firstBody.data.id);
+    expect(secondBody.data.opportunityProvenance).toHaveLength(2);
+    expect(
+      secondBody.data.opportunityProvenance.map(
+        (entry: { source: string }) => entry.source,
+      ),
+    ).toEqual(["a16z:portfolio-jobs", "linkedin"]);
+  });
+
   it("rejects duplicate manual imports by source and source job id", async () => {
     const { scoreJobSuitability } = await import("@server/services/scorer");
     vi.mocked(scoreJobSuitability).mockResolvedValue({

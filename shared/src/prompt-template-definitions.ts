@@ -42,7 +42,7 @@ Writing style formality: {{formality}}.
     ] as const,
     defaultTemplate: `
 You are an expert resume writer tailoring a profile for a specific job application.
-You must return a JSON object with three fields: "headline", "summary", and "skills".
+You must return a JSON object with four fields: "headline", "summary", "skills", and "grounding".
 
 JOB DESCRIPTION (JD):
 {{jobDescription}}
@@ -71,6 +71,12 @@ INSTRUCTIONS:
    - Return the full "items" array for the skills section, preserving the structure: { "name": "Frontend", "keywords": [...] }.
    - Write user-visible skill text in {{outputLanguage}} when natural, but keep exact JD terms, acronyms, and technology names when that helps ATS matching.
 
+4. "grounding" (Object):
+   - Cite only evidence IDs present in MY PROFILE.
+   - Cite the evidence supporting the summary and each returned skill keyword.
+   - Never cite a made-up evidence ID.
+   - If the profile does not support a skill, omit that skill instead of borrowing it from the JD.
+
 WRITING STYLE PREFERENCES:
 - Tone: {{tone}}
 - Formality: {{formality}}
@@ -86,7 +92,14 @@ OUTPUT FORMAT (JSON):
 {
   "headline": "...",
   "summary": "...",
-  "skills": [ ... ]
+  "skills": [ ... ],
+  "grounding": {
+    "headlineEvidenceIds": [ ... ],
+    "summaryEvidenceIds": [ ... ],
+    "skills": [
+      { "name": "TypeScript", "evidenceIds": [ "skill:backend" ] }
+    ]
+  }
 }
 `.trim(),
   },
@@ -109,11 +122,12 @@ OUTPUT FORMAT (JSON):
 You are evaluating a job listing for a candidate. Score how suitable this job is for the candidate on a scale of 0-100.
 
 SCORING CRITERIA:
-- Skills match (technologies, frameworks, languages): 0-30 points
-- Experience level match: 0-25 points
-- Location/remote work alignment: 0-15 points
-- Industry/domain fit: 0-15 points
-- Career growth potential: 0-15 points
+- Domain overlap (fintech/finance ops, AI product, AI music/audio, developer tools, SaaS infra): 0-40 points
+- Team edge (hiring team signals overlap with the candidate's proven work and interests): 0-30 points
+- Experience match (role close to something the candidate has literally shipped): 0-20 points
+- Small bridges (school, internships, OSS contributions, communities, stage fit): 0-10 points
+
+Use the scoring instructions below for the exact rules, weights, and the candidate's proven edge anchors.
 
 CANDIDATE PROFILE:
 {{profileJson}}

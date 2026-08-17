@@ -40,4 +40,28 @@ describe("importJobsStep", () => {
       employer: job.employer,
     });
   });
+
+  it("classifies public application-email evidence and leaves connections unknown", async () => {
+    const jobsRepo = await import("@server/repositories/jobs");
+    const job: CreateJobInput = {
+      source: "hackernews:who-is-hiring",
+      title: "Backend Engineer",
+      employer: "Acme",
+      jobUrl: "https://example.com/jobs/2",
+      jobDescription: "Apply by email with your CV to jobs@example.com.",
+    };
+
+    await importJobsStep({ discoveredJobs: [job] });
+
+    expect(vi.mocked(jobsRepo.createJobs).mock.calls.at(-1)?.[0]).toEqual([
+      expect.objectContaining({
+        opportunitySignals: expect.objectContaining({
+          hasOpenRole: true,
+          hasDirectApplicationEmail: true,
+          hasWarmConnection: false,
+          warmConnectionStatus: "unknown",
+        }),
+      }),
+    ]);
+  });
 });
